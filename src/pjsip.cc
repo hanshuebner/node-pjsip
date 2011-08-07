@@ -853,12 +853,12 @@ PJSUA::EIO_waitForEvent(eio_req* req)
   return 0;
 }
 
-Local<Value>
+Handle<Value>
 JsonToV8(Json::Value value)
 {
   switch (value.type()) {
   case Json::nullValue:
-    return *Undefined();
+    return Undefined();
   case Json::intValue:
     return Integer::New(value.asInt());
   case Json::uintValue:
@@ -868,10 +868,10 @@ JsonToV8(Json::Value value)
   case Json::stringValue:
     return String::New(value.asCString());
   case Json::booleanValue:
-    return value.asBool() ? *True() : *False();
+    return value.asBool() ? True() : False();
   case Json::arrayValue:
     {
-      Local<Array> v8array = Array::New(value.size());
+      Handle<Array> v8array = Array::New(value.size());
       for (Json::ArrayIndex i = 0; i < value.size(); i++) {
         v8array->Set(i, JsonToV8(value[i]));
       }
@@ -879,7 +879,7 @@ JsonToV8(Json::Value value)
     }
   case Json::objectValue:
     {
-      Local<Object> v8object = Object::New();
+      Handle<Object> v8object = Object::New();
       const Json::Value::Members& members = value.getMemberNames();
       for (vector<string>::const_iterator i = members.begin(); i != members.end(); i++) {
         v8object->Set(JsonToV8((*i).c_str()), JsonToV8(value[*i]));
@@ -902,7 +902,7 @@ PJSUA::EIO_waitForEventDone(eio_req* req)
 
   Local<Value> argv[2];
   argv[0] = String::New(event->eventName().c_str());
-  argv[1] = JsonToV8(event->eventData());
+  argv[1] = *JsonToV8(event->eventData());
 
   TryCatch tryCatch;
   _callback->Call(Context::GetCurrent()->Global(), 2, argv);
@@ -1054,8 +1054,8 @@ PJSUA::addAccount(const Arguments& args)
         if (status != PJ_SUCCESS) {
           throw PJJSException("Error adding account", status);
         }
+        return Integer::New(acc_id);
     }
-    return Undefined();
   }
   catch (const JSException& e) {
     return e.asV8Exception();
