@@ -9,11 +9,14 @@ function processEvent(event, arg)
 
 pjsua.start(processEvent);
 
-pjsua.addAccount(process.env.SIP_USER, process.env.SIP_GATEWAY, process.env.SIP_PASSWORD);
-
 var r = repl.start('node> ');
 
 r.context.pjsua = pjsua;
+
+r.context.addAccount = function()
+{
+    pjsua.addAccount(process.env.SIP_USER, process.env.SIP_GATEWAY, process.env.SIP_PASSWORD);
+};
 
 r.context.done = function()
 {

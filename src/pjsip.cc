@@ -26,6 +26,7 @@
 #include <v8.h>
 #include <node.h>
 #include <node_events.h>
+#include <node/ev.h>
 
 // prevent name clash between pjsua.h and node.h
 #define pjsip_module pjsip_module_
@@ -1136,8 +1137,8 @@ Handle<Value>
 PJSUA::callMakeCall(const Arguments& args)
 {
   try {
-    if (args.Length() < 2 || args.Length() > 6) {
-      throw JSException("Invalid number of arguments to callMakeCall (accId, destUri[, options[, user_data[, msg_data[, p_call_id]]]])");
+    if (args.Length() < 2 || args.Length() > 5) {
+      throw JSException("Invalid number of arguments to callMakeCall (accId, destUri[, options[, user_data[, msg_data]]])");
     }
 
     pjsua_acc_id acc_id = args[0]->Int32Value();
@@ -1145,27 +1146,26 @@ PJSUA::callMakeCall(const Arguments& args)
     unsigned options = 0;
     void* user_data = 0;
     pjsua_msg_data* msg_data = 0;
-    pjsua_call_id* p_call_id = 0;
+    pjsua_call_id call_id = 0;
 
     switch (args.Length()) {
-      // FIXME: implement options/user_data/msg_data/p_call_id
-    case 6:
+      // FIXME: implement options/user_data/msg_data
     case 5:
     case 4:
     case 3:
-      throw JSException("options, user_data, msg_data and p_call_id arguments not implemented");
+      throw JSException("options, user_data and msg_data arguments not implemented");
     }
 
     pj_str_t pj_dest_uri;
     pj_dest_uri.ptr = (char*) *dest_uri;
     pj_dest_uri.slen = dest_uri.length();
 
-    pj_status_t status = pjsua_call_make_call(acc_id, &pj_dest_uri, options, user_data, msg_data, p_call_id);
+    pj_status_t status = pjsua_call_make_call(acc_id, &pj_dest_uri, options, user_data, msg_data, &call_id);
     if (status != PJ_SUCCESS) {
       throw PJJSException("Error making call", status);
     }
 
-    return Undefined();
+    return Integer::New(call_id);
   }
   catch (const JSException& e) {
     return e.asV8Exception();
