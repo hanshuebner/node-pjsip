@@ -21,21 +21,23 @@
 // IN THE SOFTWARE.
 
 #include <iostream>
-#include <queue>
+#include <map>
+#include <vector>
+#include <typeinfo>
+
+#include <stdarg.h>
 
 #include <v8.h>
 #include <node.h>
-#include <node_events.h>
-#include <node/ev.h>
+#include <node_events.h>                                    // needed?
+#include <node/ev.h>                                        // needed?
 
 // prevent name clash between pjsua.h and node.h
 #define pjsip_module pjsip_module_
 #include <pjsua-lib/pjsua.h>
 #undef pjsip_module
 
-#include "json/json.h"
-
-#include "mutex.h"
+#include "mutex.h"                                          // needed?
 
 using namespace std;
 using namespace v8;
@@ -84,390 +86,113 @@ PJJSException::message() const
   return _message + ": " + string(buf);
 }
 
-// //////////////////////////////////////////////////////////////////////
-//
-// Event classes - Callbacks invoked by PJSUA instantiate subclass
-// instances and queue them to the main Node thread for processing.
-// Every event class carries a representation of the event.
-// 
-// //////////////////////////////////////////////////////////////////////
-
-class PJSUAEvent
+class UnknownEnumerationKey
+  : public JSException
 {
 public:
-  virtual const string eventName() const = 0;
-  virtual ~PJSUAEvent() {};
-
-  const Json::Value& eventData() const { return _eventData; }
-
-protected:
-  Json::Value _eventData;
-};
-
-class PJSUACallEvent
-  : public virtual PJSUAEvent
-{
-protected:
-  PJSUACallEvent(pjsua_call_id callId);
-};
-
-
-class PJSUAAccStateEvent
-  : public virtual PJSUAEvent
-{
-protected:
-  PJSUAAccStateEvent(pjsua_acc_id acc_id);
-};
-
-class PJSUACallStateEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUACallStateEvent(pjsua_call_id call_id,
-                      pjsip_event *e)
-    : PJSUACallEvent(call_id)
+  UnknownEnumerationKey(const char* name, const char* typenamestring)
+    : JSException("Unknown enumeration key \"" + string(name) + "\" in table " + string(typenamestring))
   {}
-  virtual const string eventName() const { return "call_state"; }
 };
 
-class PJSUAIncomingCallEvent
-  : public PJSUACallEvent,
-    public PJSUAAccStateEvent
+template <class EnumType>
+class EnumMap
 {
 public:
-  PJSUAIncomingCallEvent(pjsua_acc_id acc_id,
-                         pjsua_call_id call_id,
-                         pjsip_rx_data *rdata)
-    : PJSUACallEvent(call_id),
-      PJSUAAccStateEvent(acc_id)
-  {}
-  virtual const string eventName() const { return "incoming_call"; }
-};
-
-class PJSUACallTsxStateEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUACallTsxStateEvent(pjsua_call_id call_id,
-                         pjsip_transaction *tsx,
-                         pjsip_event *e)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "call_tsx_state"; }
-};
-
-class PJSUACallMediaStateEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUACallMediaStateEvent(pjsua_call_id call_id)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "call_media_state"; }
-};
-
-class PJSUAStreamCreatedEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUAStreamCreatedEvent(pjsua_call_id call_id,
-                          pjmedia_session *sess,
-                          unsigned stream_idx,
-                          pjmedia_port **p_port)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "stream_created"; }
-};
-
-class PJSUAStreamDestroyedEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUAStreamDestroyedEvent(pjsua_call_id call_id,
-                            pjmedia_session *sess,
-                            unsigned stream_idx)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "stream_destroyed"; }
-};
-
-class PJSUADtmfDigitEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUADtmfDigitEvent(pjsua_call_id call_id,
-                      int digit)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "dtmf_digit"; }
-};
-
-class PJSUACallTransferRequestEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUACallTransferRequestEvent(pjsua_call_id call_id,
-                                const pj_str_t *dst,
-                                pjsip_status_code *code)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "call_transfer_request"; }
-};
-
-class PJSUACallTransferStatusEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUACallTransferStatusEvent(pjsua_call_id call_id,
-                               int st_code,
-                               const pj_str_t *st_text,
-                               pj_bool_t final,
-                               pj_bool_t *p_cont)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "call_transfer_status"; }
-};
-
-class PJSUACallReplaceRequestEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUACallReplaceRequestEvent(pjsua_call_id call_id,
-                               pjsip_rx_data *rdata,
-                               int *st_code,
-                               pj_str_t *st_text)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "call_replace_request"; }
-};
-
-class PJSUACallReplacedEvent
-  : public PJSUACallEvent
-{
-public:
-  PJSUACallReplacedEvent(pjsua_call_id old_call_id,
-                         pjsua_call_id new_call_id)
-    : PJSUACallEvent(old_call_id)
-  {}
-  virtual const string eventName() const { return "call_replaced"; }
-};
-
-class PJSUARegStateEvent
-  : public PJSUAAccStateEvent
-{
-public:
-  PJSUARegStateEvent(pjsua_acc_id acc_id)
-    : PJSUAAccStateEvent(acc_id)
-  {}
-  virtual const string eventName() const { return "reg_state"; }
-};
-
-class PJSUARegState2Event
-  : public PJSUAAccStateEvent
-{
-public:
-  PJSUARegState2Event(pjsua_acc_id acc_id,
-                      pjsua_reg_info *info)
-    : PJSUAAccStateEvent(acc_id)
+  EnumMap(const char* symbols[])
   {
+    for (int i = 0; symbols[i]; i++) {
+      _nameToIdMap[symbols[i]] = (EnumType) i;
+      _idToNameMap.push_back(symbols[i]);
+    }
   }
-  virtual const string eventName() const { return "reg_state2"; }
+
+  const char* idToName(EnumType id) const
+  {
+    unsigned i = (unsigned) id;
+    if (i > _idToNameMap.size()) {
+      return "UNKNOWN-ID-OUT-OF-RANGE";
+    } else {
+      return _idToNameMap[i];
+    }
+  }
+
+  const EnumType nameToId(const char* name) const
+  {
+    typename map<const string, EnumType>::const_iterator i = _nameToIdMap.find(name);
+    if (i == _nameToIdMap.end()) {
+      throw UnknownEnumerationKey(name, typeid(*this).name());
+    } else {
+      return i->second;
+    }
+  }
+
+  const EnumType nameToId(Handle<String> name) const
+  {
+    return nameToId(*String::Utf8Value(name));
+  }
+
+  const EnumType nameToId(Handle<Value> name) const
+  {
+    return nameToId(*String::Utf8Value(name->ToString()));
+  }
+
+private:
+  map<const string, EnumType> _nameToIdMap;
+  vector<const char*> _idToNameMap;
 };
 
-class PJSUAIncomingSubscribeEvent
-  : public PJSUAAccStateEvent
-{
-public:
-  PJSUAIncomingSubscribeEvent(pjsua_acc_id acc_id,
-                              pjsua_srv_pres *srv_pres,
-                              pjsua_buddy_id buddy_id,
-                              const pj_str_t *from,
-                              pjsip_rx_data *rdata,
-                              pjsip_status_code *code,
-                              pj_str_t *reason,
-                              pjsua_msg_data *msg_data)
-    : PJSUAAccStateEvent(acc_id)
-  {}
-  virtual const string eventName() const { return "incoming_subscribe"; }
-};
+// //////////////////////////////////////////////////////////////////////
 
-class PJSUASrvSubscribeStateEvent
-  : public PJSUAAccStateEvent
+static inline void
+setKey(Handle<Object> object, const char* key, const char* value, int length = -1)
 {
-public:
-  PJSUASrvSubscribeStateEvent(pjsua_acc_id acc_id,
-                              pjsua_srv_pres *srv_pres,
-                              const pj_str_t *remote_uri,
-                              pjsip_evsub_state state,
-                              pjsip_event *event)
-    : PJSUAAccStateEvent(acc_id)
-  {}
-  virtual const string eventName() const { return "srv_subscribe_state"; }
-};
+  object->Set(String::NewSymbol(key), String::New(value, length));
+}
 
-class PJSUABuddyStateEvent
-  : public PJSUAEvent
+static inline void
+setKey(Handle<Object> object, const char* key, int value)
 {
-public:
-  PJSUABuddyStateEvent(pjsua_buddy_id buddy_id)
-  {}
-  virtual const string eventName() const { return "buddy_state"; }
-};
+  object->Set(String::NewSymbol(key), Integer::New(value));
+}
 
-class PJSUABuddyEvsubStateEvent
-  : public PJSUAEvent
+static inline void
+setKey(Handle<Object> object, const char* key, unsigned value)
 {
-public:
-  PJSUABuddyEvsubStateEvent(pjsua_buddy_id buddy_id,
-                            pjsip_evsub *sub,
-                            pjsip_event *event)
-  {}
-  virtual const string eventName() const { return "buddy_evsub_state"; }
-};
+  object->Set(String::NewSymbol(key), Integer::New(value));
+}
 
-class PJSUAPagerEvent
-  : public PJSUACallEvent
+static inline void
+setKey(Handle<Object> object, const char* key, bool value)
 {
-public:
-  PJSUAPagerEvent(pjsua_call_id call_id,
-                  const pj_str_t *from,
-                  const pj_str_t *to,
-                  const pj_str_t *contact,
-                  const pj_str_t *mime_type,
-                  const pj_str_t *body)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "pager"; }
-};
+  object->Set(String::NewSymbol(key), Boolean::New(value));
+}
 
-class PJSUAPager2Event
-  : public PJSUACallEvent,
-    public PJSUAAccStateEvent
+static inline void
+setKey(Handle<Object> object, const char* key, Handle<Object> value)
 {
-public:
-  PJSUAPager2Event(pjsua_call_id call_id,
-                   const pj_str_t *from,
-                   const pj_str_t *to,
-                   const pj_str_t *contact,
-                   const pj_str_t *mime_type,
-                   const pj_str_t *body,
-                   pjsip_rx_data *rdata,
-                   pjsua_acc_id acc_id)
-    : PJSUACallEvent(call_id),
-      PJSUAAccStateEvent(acc_id)
-  {}
-  virtual const string eventName() const { return "pager2"; }
-};
+  object->Set(String::NewSymbol(key), value);
+}
 
-class PJSUAPagerStatusEvent
-  : public PJSUACallEvent
+static inline void
+setKey(Handle<Object> object, const char* key, double value)
 {
-public:
-  PJSUAPagerStatusEvent(pjsua_call_id call_id,
-                        const pj_str_t *to,
-                        const pj_str_t *body,
-                        void *user_data,
-                        pjsip_status_code status,
-                        const pj_str_t *reason)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "pager_status"; }
-};
+  object->Set(String::NewSymbol(key), Number::New(value));
+}
 
-class PJSUAPagerStatus2Event
-  : public PJSUACallEvent,
-    public PJSUAAccStateEvent
+static inline void
+setKey(Handle<Object> object, const char* key, const pj_str_t* value)
 {
-public:
-  PJSUAPagerStatus2Event(pjsua_call_id call_id,
-                         const pj_str_t *to,
-                         const pj_str_t *body,
-                         void *user_data,
-                         pjsip_status_code status,
-                         const pj_str_t *reason,
-                         pjsip_tx_data *tdata,
-                         pjsip_rx_data *rdata,
-                         pjsua_acc_id acc_id)
-    : PJSUACallEvent(call_id),
-      PJSUAAccStateEvent(acc_id)
-  {}
-  virtual const string eventName() const { return "pager_status2"; }
-};
+  object->Set(String::NewSymbol(key), String::New(value->ptr, value->slen));
+}
 
-class PJSUATypingEvent
-  : public PJSUACallEvent
+static inline void
+setKey(Handle<Object> object, const char* key, const pj_str_t& value)
 {
-public:
-  PJSUATypingEvent(pjsua_call_id call_id,
-                   const pj_str_t *from,
-                   const pj_str_t *to,
-                   const pj_str_t *contact,
-                   pj_bool_t is_typing)
-    : PJSUACallEvent(call_id)
-  {}
-  virtual const string eventName() const { return "typing"; }
-};
+  object->Set(String::NewSymbol(key), String::New(value.ptr, value.slen));
+}
 
-class PJSUATyping2Event
-  : public PJSUACallEvent,
-    public PJSUAAccStateEvent
-{
-public:
-  PJSUATyping2Event(pjsua_call_id call_id,
-                    const pj_str_t *from,
-                    const pj_str_t *to,
-                    const pj_str_t *contact,
-                    pj_bool_t is_typing,
-                    pjsip_rx_data *rdata,
-                    pjsua_acc_id acc_id)
-    : PJSUACallEvent(call_id),
-      PJSUAAccStateEvent(acc_id)
-  {}
-  virtual const string eventName() const { return "typing2"; }
-};
-
-class PJSUANatDetectEvent
-  : public PJSUAEvent
-{
-public:
-  PJSUANatDetectEvent(const pj_stun_nat_detect_result *res)
-  {}
-  virtual const string eventName() const { return "nat_detect"; }
-};
-
-class PJSUAMwiInfoEvent
-  : public PJSUAAccStateEvent
-{
-public:
-  PJSUAMwiInfoEvent(pjsua_acc_id acc_id,
-                    pjsua_mwi_info *mwi_info)
-    : PJSUAAccStateEvent(acc_id)
-  {}
-  virtual const string eventName() const { return "mwi_info"; }
-};
-
-class PJSUATransportStateEvent
-  : public PJSUAEvent
-{
-public:
-  PJSUATransportStateEvent(pjsip_transport *tp,
-                           pjsip_transport_state state,
-                           const pjsip_transport_state_info *info)
-  {}
-  virtual const string eventName() const { return "transport_state"; }
-};
-
-class PJSUAIceTransportErrorEvent
-  : public PJSUAEvent
-{
-public:
-  PJSUAIceTransportErrorEvent(int index,
-                              pj_ice_strans_op op,
-                              pj_status_t status,
-                              void *param)
-  {}
-  virtual const string eventName() const { return "ice_transport_error"; }
-};
+#define PJ_TIME_VAL_TO_DOUBLE(pjtv) ((double) pjtv.sec + ((double) pjtv.msec * 0.001d))
 
 // //////////////////////////////////////////////////////////////////////
 
@@ -475,293 +200,380 @@ public:
 
 class PJSUA
 {
-  static queue<PJSUAEvent*> _eventQueue;
-  static mutex _eventQueueLock;
-  static condition_variable _eventQueueFull;
   static Persistent<Function> _callback;
-
-  // //////////////////////////////////////////////////////////////////////
-  //
-  // libev interface
-  
-  static int EIO_waitForEvent(eio_req* req);
-  static int EIO_waitForEventDone(eio_req* req);
-
-  static void startEio()
-  {
-    eio_custom(EIO_waitForEvent,
-               EIO_PRI_DEFAULT,
-               EIO_waitForEventDone,
-               0);
-  }
 
   // //////////////////////////////////////////////////////////////////////
   //
   // Callback functions to be called by PJ
 
-  static void on_call_state(pjsua_call_id call_id,
-                            pjsip_event *e)
+  static Handle<Object>
+  getCallInfo(pjsua_call_id call_id)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUACallStateEvent(call_id, e));
-    _eventQueueFull.notify_one();
+    pjsua_call_info callInfoBinary;
+    pjsua_call_get_info(call_id, &callInfoBinary);
+
+    Local<Object> callInfo = Object::New();
+    setKey(callInfo, "id", callInfoBinary.id);
+    setKey(callInfo, "role", (callInfoBinary.role == PJSIP_ROLE_UAC) ? "UAC" : "UAS");
+    setKey(callInfo, "acc_id", callInfoBinary.acc_id);
+    setKey(callInfo, "local_info", callInfoBinary.local_info);
+    setKey(callInfo, "local_contact", callInfoBinary.local_contact);
+    setKey(callInfo, "remote_info", callInfoBinary.remote_info);
+    setKey(callInfo, "remote_contact", callInfoBinary.remote_contact);
+    setKey(callInfo, "call_id", callInfoBinary.call_id);
+    setKey(callInfo, "state", (int) callInfoBinary.state);
+    setKey(callInfo, "state_text", callInfoBinary.state_text);
+    setKey(callInfo, "last_status", (int) callInfoBinary.last_status);
+    setKey(callInfo, "last_status_text", callInfoBinary.last_status_text);
+    setKey(callInfo, "media_status", (int) callInfoBinary.media_status);
+    setKey(callInfo, "media_dir", (int) callInfoBinary.media_dir);
+    setKey(callInfo, "conf_slot", (int) callInfoBinary.conf_slot);
+    setKey(callInfo, "connect_duration", PJ_TIME_VAL_TO_DOUBLE(callInfoBinary.connect_duration));
+    setKey(callInfo, "total_duration", PJ_TIME_VAL_TO_DOUBLE(callInfoBinary.total_duration));
+
+    return callInfo;
   }
 
-  static void on_incoming_call(pjsua_acc_id acc_id,
-                               pjsua_call_id call_id,
-                               pjsip_rx_data *rdata)
+  static Handle<Object>
+  getAccInfo(pjsua_acc_id accId)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAIncomingCallEvent(acc_id, call_id, rdata));
-    _eventQueueFull.notify_one();
+    pjsua_acc_info accInfoBinary;
+    pjsua_acc_get_info(accId, &accInfoBinary);
+
+    Local<Object> accInfo = Object::New();
+    setKey(accInfo, "id", accInfoBinary.id);
+    setKey(accInfo, "is_default", (bool) accInfoBinary.is_default);
+    setKey(accInfo, "acc_uri", accInfoBinary.acc_uri);
+    setKey(accInfo, "has_registration", (bool) accInfoBinary.has_registration);
+    setKey(accInfo, "expires", accInfoBinary.expires);
+    setKey(accInfo, "status", accInfoBinary.status);
+    setKey(accInfo, "reg_last_err", accInfoBinary.reg_last_err);
+    setKey(accInfo, "status_text", accInfoBinary.status_text);
+    setKey(accInfo, "online_status", (bool) accInfoBinary.online_status);
+    setKey(accInfo, "online_status_text", accInfoBinary.online_status_text);
+
+    Local<Object> rpid = Object::New();
+    setKey(rpid, "type", accInfoBinary.rpid.type);
+    setKey(rpid, "id", accInfoBinary.rpid.id);
+    setKey(rpid, "activity", accInfoBinary.rpid.activity);
+    setKey(rpid, "note", accInfoBinary.rpid.note);
+    setKey(accInfo, "rpid", rpid);
+
+    return accInfo;
   }
 
-  static void on_call_tsx_state(pjsua_call_id call_id,
-                                pjsip_transaction *tsx,
-                                pjsip_event *e)
+  static Local<Value>
+  invokeCallback(const char* eventName, int argc, ...)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUACallTsxStateEvent(call_id, tsx, e));
-    _eventQueueFull.notify_one();
+    Local<Value> args[argc + 1];
+    args[0] = String::New(eventName);
+
+    va_list vl;
+    va_start(vl, argc);
+    for (int i = 0; i < argc; i++) {
+      args[i + 1] = *va_arg(vl, Handle<Value>);
+    }
+
+    TryCatch tryCatch;
+    _callback->Call(Context::GetCurrent()->Global(), argc + 1, args);
+
+    if (tryCatch.HasCaught()) {
+      FatalException(tryCatch);
+    }
+
+    return *Undefined();                                     // fixme: Undefined?
   }
 
-  static void on_call_media_state(pjsua_call_id call_id)
+  static void
+  on_call_state(pjsua_call_id call_id,
+                pjsip_event *e)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUACallMediaStateEvent(call_id));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("call_state", 1, getCallInfo(call_id));
   }
 
-  static void on_stream_created(pjsua_call_id call_id,
-                                pjmedia_session *sess,
-                                unsigned stream_idx,
-                                pjmedia_port **p_port)
+  static void
+  on_incoming_call(pjsua_acc_id acc_id,
+                   pjsua_call_id call_id,
+                   pjsip_rx_data *rdata)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAStreamCreatedEvent(call_id, sess, stream_idx, p_port));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("incoming_call", 3, getAccInfo(acc_id), getCallInfo(call_id), Undefined());                   
   }
 
-  static void on_stream_destroyed(pjsua_call_id call_id,
-                                  pjmedia_session *sess,
-                                  unsigned stream_idx)
+  static void
+  on_call_tsx_state(pjsua_call_id call_id,
+                    pjsip_transaction *tsx,
+                    pjsip_event *e)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAStreamDestroyedEvent(call_id, sess, stream_idx));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("tsx_state", 3, getCallInfo(call_id), Undefined(), Undefined());
   }
 
-  static void on_dtmf_digit(pjsua_call_id call_id,
-                            int digit)
+  static void
+  on_call_media_state(pjsua_call_id call_id)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUADtmfDigitEvent(call_id, digit));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("media_state", 1, getCallInfo(call_id));
   }
 
-  static void on_call_transfer_request(pjsua_call_id call_id,
-                                       const pj_str_t *dst,
-                                       pjsip_status_code *code)
+  static void
+  on_stream_created(pjsua_call_id call_id,
+                    pjmedia_session *sess,
+                    unsigned stream_idx,
+                    pjmedia_port **p_port)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUACallTransferRequestEvent(call_id, dst, code));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("stream_created", 4, getCallInfo(call_id), Undefined(), Integer::New(stream_idx), Undefined());
   }
 
-  static void on_call_transfer_status(pjsua_call_id call_id,
-                                      int st_code,
-                                      const pj_str_t *st_text,
-                                      pj_bool_t final,
-                                      pj_bool_t *p_cont)
+  static void
+  on_stream_destroyed(pjsua_call_id call_id,
+                      pjmedia_session *sess,
+                      unsigned stream_idx)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUACallTransferStatusEvent(call_id, st_code, st_text, final, p_cont));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("stream_destroyed", 3, getCallInfo(call_id), Undefined(), Integer::New(stream_idx));
   }
 
-  static void on_call_replace_request(pjsua_call_id call_id,
-                                      pjsip_rx_data *rdata,
-                                      int *st_code,
-                                      pj_str_t *st_text)
+  static void
+  on_dtmf_digit(pjsua_call_id call_id,
+                int digit)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUACallReplaceRequestEvent(call_id, rdata, st_code, st_text));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("dtmf_digit", 2, getCallInfo(call_id), Integer::New(digit));
   }
 
-  static void on_call_replaced(pjsua_call_id old_call_id,
-                               pjsua_call_id new_call_id)
+  static void
+  on_call_transfer_request(pjsua_call_id call_id,
+                           const pj_str_t *dst,
+                           pjsip_status_code *code)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUACallReplacedEvent(old_call_id, new_call_id));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    Local<Value> result = invokeCallback("transfer_request", 3, getCallInfo(call_id), Undefined(), Undefined());
+    *code = (pjsip_status_code) result->ToInteger()->Value();
   }
 
-  static void on_reg_state(pjsua_acc_id acc_id)
+  static void
+  on_call_transfer_status(pjsua_call_id call_id,
+                          int st_code,
+                          const pj_str_t *st_text,
+                          pj_bool_t final,
+                          pj_bool_t *p_cont)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUARegStateEvent(acc_id));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    Local<Value> result = invokeCallback("transfer_status", 4, getCallInfo(call_id), Integer::New(st_code),
+                                         String::New(st_text->ptr, st_text->slen), Boolean::New(final));
+    *p_cont = result->ToBoolean()->Value();
   }
 
-  static void on_reg_state2(pjsua_acc_id acc_id,
-                            pjsua_reg_info *info)
+  static void
+  on_call_replace_request(pjsua_call_id call_id,
+                          pjsip_rx_data *rdata,
+                          int *st_code,
+                          pj_str_t *st_text)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUARegState2Event(acc_id, info));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    Local<Value> result = invokeCallback("call_replace_request", 2, getCallInfo(call_id), Undefined());
+    *st_code = result->ToInteger()->Value();
+    // FIXME: st_text not supported
   }
 
-  static void on_incoming_subscribe(pjsua_acc_id acc_id,
-                                    pjsua_srv_pres *srv_pres,
-                                    pjsua_buddy_id buddy_id,
-                                    const pj_str_t *from,
-                                    pjsip_rx_data *rdata,
-                                    pjsip_status_code *code,
-                                    pj_str_t *reason,
-                                    pjsua_msg_data *msg_data)
+  static void
+  on_call_replaced(pjsua_call_id old_call_id,
+                   pjsua_call_id new_call_id)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAIncomingSubscribeEvent(acc_id, srv_pres, buddy_id, from, rdata, code, reason, msg_data));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("call_replaced", 2, getCallInfo(old_call_id), getCallInfo(new_call_id));
   }
 
-  static void on_srv_subscribe_state(pjsua_acc_id acc_id,
-                                     pjsua_srv_pres *srv_pres,
-                                     const pj_str_t *remote_uri,
-                                     pjsip_evsub_state state,
-                                     pjsip_event *event)
+  static void
+  on_reg_state(pjsua_acc_id acc_id)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUASrvSubscribeStateEvent(acc_id, srv_pres, remote_uri, state, event));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("reg_state", 1, getAccInfo(acc_id));
   }
 
-  static void on_buddy_state(pjsua_buddy_id buddy_id)
+  static void
+  on_reg_state2(pjsua_acc_id acc_id,
+                pjsua_reg_info *info)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUABuddyStateEvent(buddy_id));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("reg_state2", 2, getAccInfo(acc_id), Undefined());
   }
 
-  static void on_buddy_evsub_state(pjsua_buddy_id buddy_id,
-                                   pjsip_evsub *sub,
-                                   pjsip_event *event)
-  {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUABuddyEvsubStateEvent(buddy_id, sub, event));
-    _eventQueueFull.notify_one();
-  }
-
-  static void on_pager(pjsua_call_id call_id,
-                       const pj_str_t *from,
-                       const pj_str_t *to,
-                       const pj_str_t *contact,
-                       const pj_str_t *mime_type,
-                       const pj_str_t *body)
-  {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAPagerEvent(call_id, from, to, contact, mime_type, body));
-    _eventQueueFull.notify_one();
-  }
-
-  static void on_pager2(pjsua_call_id call_id,
+  static void
+  on_incoming_subscribe(pjsua_acc_id acc_id,
+                        pjsua_srv_pres *srv_pres,
+                        pjsua_buddy_id buddy_id,
                         const pj_str_t *from,
-                        const pj_str_t *to,
-                        const pj_str_t *contact,
-                        const pj_str_t *mime_type,
-                        const pj_str_t *body,
                         pjsip_rx_data *rdata,
-                        pjsua_acc_id acc_id)
+                        pjsip_status_code *code,
+                        pj_str_t *reason,
+                        pjsua_msg_data *msg_data)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAPager2Event(call_id, from, to, contact, mime_type, body, rdata, acc_id));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    Local<Value> result = invokeCallback("incoming_subscribe", 5, getAccInfo(acc_id), Undefined(), Undefined(),
+                                         String::New(from->ptr, from->slen), Undefined());
+    *code = (pjsip_status_code) result->ToInteger()->Value();
+    // FIXME: reason, msg_data not supported
   }
 
-  static void on_pager_status(pjsua_call_id call_id,
-                              const pj_str_t *to,
-                              const pj_str_t *body,
-                              void *user_data,
-                              pjsip_status_code status,
-                              const pj_str_t *reason)
+  static void
+  on_srv_subscribe_state(pjsua_acc_id acc_id,
+                         pjsua_srv_pres *srv_pres,
+                         const pj_str_t *remote_uri,
+                         pjsip_evsub_state state,
+                         pjsip_event *event)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAPagerStatusEvent(call_id, to, body, user_data, status, reason));
-    _eventQueueFull.notify_one();
+    Locker locker;
+    HandleScope scope;
+
+    invokeCallback("srv_subscribe_state", 5, getAccInfo(acc_id), Undefined(),
+                   String::New(remote_uri->ptr, remote_uri->slen), Undefined(), Undefined());
   }
 
-  static void on_pager_status2(pjsua_call_id call_id,
-                               const pj_str_t *to,
-                               const pj_str_t *body,
-                               void *user_data,
-                               pjsip_status_code status,
-                               const pj_str_t *reason,
-                               pjsip_tx_data *tdata,
-                               pjsip_rx_data *rdata,
-                               pjsua_acc_id acc_id)
+  static void
+  on_buddy_state(pjsua_buddy_id buddy_id)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAPagerStatus2Event(call_id, to, body, user_data, status, reason, tdata, rdata, acc_id));
-    _eventQueueFull.notify_one();
+    // FIXME: NYI
   }
 
-  static void on_typing(pjsua_call_id call_id,
-                        const pj_str_t *from,
-                        const pj_str_t *to,
-                        const pj_str_t *contact,
-                        pj_bool_t is_typing)
+  static void
+  on_buddy_evsub_state(pjsua_buddy_id buddy_id,
+                       pjsip_evsub *sub,
+                       pjsip_event *event)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUATypingEvent(call_id, from, to, contact, is_typing));
-    _eventQueueFull.notify_one();
+    // FIXME: NYI
   }
 
-  static void on_typing2(pjsua_call_id call_id,
-                         const pj_str_t *from,
-                         const pj_str_t *to,
-                         const pj_str_t *contact,
-                         pj_bool_t is_typing,
-                         pjsip_rx_data *rdata,
-                         pjsua_acc_id acc_id)
+  static void
+  on_pager(pjsua_call_id call_id,
+           const pj_str_t *from,
+           const pj_str_t *to,
+           const pj_str_t *contact,
+           const pj_str_t *mime_type,
+           const pj_str_t *body)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUATyping2Event(call_id, from, to, contact, is_typing, rdata, acc_id));
-    _eventQueueFull.notify_one();
+    // FIXME: NYI
   }
 
-  static void on_nat_detect(const pj_stun_nat_detect_result *res)
+  static void
+  on_pager2(pjsua_call_id call_id,
+            const pj_str_t *from,
+            const pj_str_t *to,
+            const pj_str_t *contact,
+            const pj_str_t *mime_type,
+            const pj_str_t *body,
+            pjsip_rx_data *rdata,
+            pjsua_acc_id acc_id)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUANatDetectEvent(res));
-    _eventQueueFull.notify_one();
+    // FIXME: NYI
   }
 
-  static void on_mwi_info(pjsua_acc_id acc_id,
-                          pjsua_mwi_info *mwi_info)
+  static void
+  on_pager_status(pjsua_call_id call_id,
+                  const pj_str_t *to,
+                  const pj_str_t *body,
+                  void *user_data,
+                  pjsip_status_code status,
+                  const pj_str_t *reason)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAMwiInfoEvent(acc_id, mwi_info));
-    _eventQueueFull.notify_one();
+    // FIXME: NYI
   }
 
-  static void on_transport_state(pjsip_transport *tp,
-                                 pjsip_transport_state state,
-                                 const pjsip_transport_state_info *info)
+  static void
+  on_pager_status2(pjsua_call_id call_id,
+                   const pj_str_t *to,
+                   const pj_str_t *body,
+                   void *user_data,
+                   pjsip_status_code status,
+                   const pj_str_t *reason,
+                   pjsip_tx_data *tdata,
+                   pjsip_rx_data *rdata,
+                   pjsua_acc_id acc_id)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUATransportStateEvent(tp, state, info));
-    _eventQueueFull.notify_one();
+    // FIXME: NYI
   }
 
-  static void on_ice_transport_error(int index,
-                                     pj_ice_strans_op op,
-                                     pj_status_t status,
-                                     void *param)
+  static void
+  on_typing(pjsua_call_id call_id,
+            const pj_str_t *from,
+            const pj_str_t *to,
+            const pj_str_t *contact,
+            pj_bool_t is_typing)
   {
-    unique_lock<mutex> lock(_eventQueueLock);
-    _eventQueue.push(new PJSUAIceTransportErrorEvent(index, op, status, param));
-    _eventQueueFull.notify_one();
+    // FIXME: NYI
+  }
+
+  static void
+  on_typing2(pjsua_call_id call_id,
+             const pj_str_t *from,
+             const pj_str_t *to,
+             const pj_str_t *contact,
+             pj_bool_t is_typing,
+             pjsip_rx_data *rdata,
+             pjsua_acc_id acc_id)
+  {
+    // FIXME: NYI
+  }
+
+  static void
+  on_nat_detect(const pj_stun_nat_detect_result *res)
+  {
+    // FIXME: NYI
+  }
+
+  static void
+  on_mwi_info(pjsua_acc_id acc_id,
+              pjsua_mwi_info *mwi_info)
+  {
+    // FIXME: NYI
+  }
+
+  static void
+  on_transport_state(pjsip_transport *tp,
+                     pjsip_transport_state state,
+                     const pjsip_transport_state_info *info)
+  {
+    // FIXME: NYI
+  }
+
+  static void
+  on_ice_transport_error(int index,
+                         pj_ice_strans_op op,
+                         pj_status_t status,
+                         void *param)
+  {
+    // FIXME: NYI
   }
 
 public:
@@ -782,141 +594,7 @@ private:
 
 // //////////////////////////////////////////////////////////////////////
 
-#define PJSTR_TO_JSON(pjstr) Json::Value(pjstr.ptr, pjstr.ptr + pjstr.slen)
-#define PJ_TIME_VAL_TO_DOUBLE(pjtv) ((double) pjtv.sec + ((double) pjtv.msec * 0.001d))
-
-PJSUACallEvent::PJSUACallEvent(pjsua_call_id callId)
-{
-  pjsua_call_info ci;
-  pjsua_call_get_info(callId, &ci);
-
-  Json::Value json_ci;
-  json_ci["id"] = ci.id;
-  json_ci["role"] = (ci.role == PJSIP_ROLE_UAC) ? "UAC" : "UAS";
-  json_ci["acc_id"] = ci.acc_id;
-  json_ci["local_info"] = PJSTR_TO_JSON(ci.local_info);
-  json_ci["local_contact"] = PJSTR_TO_JSON(ci.local_contact);
-  json_ci["remote_info"] = PJSTR_TO_JSON(ci.remote_info);
-  json_ci["remote_contact"] = PJSTR_TO_JSON(ci.remote_contact);
-  json_ci["call_id"] = PJSTR_TO_JSON(ci.call_id);
-  json_ci["state"] = (int) ci.state;
-  json_ci["state_text"] = PJSTR_TO_JSON(ci.state_text);
-  json_ci["last_status"] = (int) ci.last_status;
-  json_ci["last_status_text"] = PJSTR_TO_JSON(ci.last_status_text);
-  json_ci["media_status"] = (int) ci.media_status;
-  json_ci["media_dir"] = (int) ci.media_dir;
-  json_ci["conf_slot"] = (int) ci.conf_slot;
-  json_ci["connect_duration"] = PJ_TIME_VAL_TO_DOUBLE(ci.connect_duration);
-  json_ci["total_duration"] = PJ_TIME_VAL_TO_DOUBLE(ci.total_duration);
-  _eventData["ci"] = json_ci;
-}
-
-PJSUAAccStateEvent::PJSUAAccStateEvent(pjsua_acc_id accId)
-{
-  pjsua_acc_info ai;
-  pjsua_acc_get_info(accId, &ai);
-
-  Json::Value json_ai;
-  json_ai["id"] = ai.id;
-  json_ai["is_default"] = (bool) ai.is_default;
-  json_ai["acc_uri"] = PJSTR_TO_JSON(ai.acc_uri);
-  json_ai["has_registration"] = (bool) ai.has_registration;
-  json_ai["expires"] = ai.expires;
-  json_ai["status"] = ai.status;
-  json_ai["reg_last_err"] = ai.reg_last_err;
-  json_ai["status_text"] = PJSTR_TO_JSON(ai.status_text);
-  json_ai["online_status"] = (bool) ai.online_status;
-  json_ai["online_status_text"] = PJSTR_TO_JSON(ai.online_status_text);
-  json_ai["rpid"]["type"] = ai.rpid.type;
-  json_ai["rpid"]["id"] = PJSTR_TO_JSON(ai.rpid.id);
-  json_ai["rpid"]["activity"] = ai.rpid.activity;
-  json_ai["rpid"]["note"] = PJSTR_TO_JSON(ai.rpid.note);
-  _eventData["ai"] = json_ai;
-}
-
-// //////////////////////////////////////////////////////////////////////
-
-queue<PJSUAEvent*> PJSUA::_eventQueue;
-mutex PJSUA::_eventQueueLock;
-condition_variable PJSUA::_eventQueueFull;
 Persistent<Function> PJSUA::_callback;
-
-int
-PJSUA::EIO_waitForEvent(eio_req* req)
-{
-  unique_lock<mutex> lock(_eventQueueLock);
-  while (_eventQueue.empty()) {
-    _eventQueueFull.wait(lock);
-  }
-  req->data = _eventQueue.front();
-  _eventQueue.pop();
-
-  return 0;
-}
-
-Handle<Value>
-JsonToV8(Json::Value value)
-{
-  switch (value.type()) {
-  case Json::nullValue:
-    return Undefined();
-  case Json::intValue:
-    return Integer::New(value.asInt());
-  case Json::uintValue:
-    return Integer::New(value.asUInt());
-  case Json::realValue:
-    return Number::New(value.asDouble());
-  case Json::stringValue:
-    return String::New(value.asCString());
-  case Json::booleanValue:
-    return value.asBool() ? True() : False();
-  case Json::arrayValue:
-    {
-      Handle<Array> v8array = Array::New(value.size());
-      for (Json::ArrayIndex i = 0; i < value.size(); i++) {
-        v8array->Set(i, JsonToV8(value[i]));
-      }
-      return v8array;
-    }
-  case Json::objectValue:
-    {
-      Handle<Object> v8object = Object::New();
-      const Json::Value::Members& members = value.getMemberNames();
-      for (vector<string>::const_iterator i = members.begin(); i != members.end(); i++) {
-        v8object->Set(JsonToV8((*i).c_str()), JsonToV8(value[*i]));
-      }
-      return v8object;
-    }
-  default:
-    // FIXME: better error reporting
-    cerr << "unrecognized type " << value.type() << " in JSON data" << endl;
-    abort();
-  }
-}
-
-int
-PJSUA::EIO_waitForEventDone(eio_req* req)
-{
-  PJSUAEvent* event = (PJSUAEvent*) req->data;
-
-  HandleScope scope;
-
-  Local<Value> argv[2];
-  argv[0] = String::New(event->eventName().c_str());
-  argv[1] = *JsonToV8(event->eventData());
-
-  TryCatch tryCatch;
-  _callback->Call(Context::GetCurrent()->Global(), 2, argv);
-
-  if (tryCatch.HasCaught()) {
-    FatalException(tryCatch);
-  }
-
-  delete event;
-  startEio();
-
-  return 0;
-}
 
 void
 PJSUA::Initialize(Handle<Object> target)
@@ -1006,12 +684,6 @@ PJSUA::start(const Arguments& args)
       if (status != PJ_SUCCESS) {
         throw PJJSException("Error starting pjsua", status);
       }
-    }
-
-    {
-      startEio();
-
-      ev_ref(EV_DEFAULT_UC);
     }
 
     return Undefined();
@@ -1175,8 +847,6 @@ PJSUA::callMakeCall(const Arguments& args)
 Handle<Value>
 PJSUA::stop(const Arguments& args)
 {
-  ev_unref(EV_DEFAULT_UC);
-
   return Undefined();
 }
 
