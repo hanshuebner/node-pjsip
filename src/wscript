@@ -23,4 +23,4 @@ def build(bld):
   obj.cxxflags = ["-g", "-D_FILE_OFFSET_BITS=64", "-D_LARGEFILE_SOURCE", "-Wall", "-I.." ]
   obj.libs = libs
   obj.target = "pjsip"
-  obj.source = "pjsip.cc jsoncpp.cpp"
+  obj.source = "pjsip.cc"
