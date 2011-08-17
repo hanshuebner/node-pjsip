@@ -635,9 +635,10 @@ NodeMutex PJSUA::_nodeMutex;
 
 // NodeMutex::Lock is a scoped lock that locks out Node's thread,
 // i.e. when the instance has been constructed: Node's thread is
-// suspended during the life time of a NodeMutex::Lock instances.
-// Only one thread may create NodeSuspender instances, only one
-// instance may exist at any time.
+// suspended during the life time of a NodeMutex::Lock instances.  In
+// addition to suspending Node's thread by the way of libev and
+// condition variables, the Lock instance also locks V8 using
+// v8::Locker and enters the context of the callback.
 
 NodeMutex::Lock::Lock(NodeMutex& mutex)
   : _mutex(mutex)
