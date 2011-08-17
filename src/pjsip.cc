@@ -195,16 +195,15 @@ setKey(Handle<Object> object, const char* key, const pj_str_t& value)
 
 // //////////////////////////////////////////////////////////////////////
 
-// The callback functions invoked by PJSIP from a separate thread
-// need to access V8 in order to invoke the JavaScript callback
-// functions.  V8 itself is not thread safe, i.e. only one thread
-// may access it at any time.  Thus, Node's thread needs to be
-// suspended while the PJSIP callbacks are processed.  This is
-// facilitated by a ev_async event to signal Node's thread that a
-// PJSIP callback wants to access V8, a mutex to protect the
-// execution of the critical section, and a condition variable and
-// mutex combination that is used by the ev_async callback to signal
-// the PJSIP callback thread to proceed.
+// The callback functions invoked by PJSIP from a separate thread need
+// to access V8 in order to invoke the JavaScript callback functions.
+// V8 itself is not thread safe, i.e. only one thread may access it at
+// any time.  Thus, Node's thread needs to be suspended while the
+// PJSIP callbacks are processed.  This is facilitated by a ev_async
+// event to signal Node's thread that a PJSIP callback wants to access
+// V8, a condition variable to signal the callback thread that Node's
+// thread has suspended, and another condition variable to signal
+// Node's that that the callback has finished processing.
   
 class NodeMutex
 {
