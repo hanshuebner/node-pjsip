@@ -196,11 +196,67 @@ setKey(Handle<Object> object, const char* key, const pj_str_t& value)
 
 // //////////////////////////////////////////////////////////////////////
 
+// The callback functions invoked by PJSIP from a separate thread
+// need to access V8 in order to invoke the JavaScript callback
+// functions.  V8 itself is not thread safe, i.e. only one thread
+// may access it at any time.  Thus, Node's thread needs to be
+// suspended while the PJSIP callbacks are processed.  This is
+// facilitated by a ev_async event to signal Node's thread that a
+// PJSIP callback wants to access V8, a mutex to protect the
+// execution of the critical section, and a condition variable and
+// mutex combination that is used by the ev_async callback to signal
+// the PJSIP callback thread to proceed.
+  
+class NodeMutex
+{
+public:
+  class Lock
+  {
+  public:
+    Lock(NodeMutex& mutex);
+    ~Lock();
+
+  private:
+    NodeMutex& _mutex;
+    Locker* _locker;
+    Context::Scope* _scope;
+  };
+
+  friend class Lock;
+
+  // Note:  NodeMutex instances must be created from within Node's thread.
+  NodeMutex(Handle<Context> callbackContext);
+  ~NodeMutex();
+
+private:
+  // Methods to suspend and resume Node's thread
+  void suspendNodeThread();
+  void resumeNodeThread();
+  
+  static void eventCallback(EV_P_ ev_async* w, int revents);
+
+  void suspend();               // suspend the current (Node) thread, giving way to the other thread
+
+  pthread_t _nodeThreadId;      // thread ID of node's thread
+  Handle<Context> _callbackContext;
+  Handle<Context> callbackContext() { return _callbackContext; }
+
+  ev_async _watcher;            // signalled by the other thread to suspend Node's thread
+  condition_variable _proceed;  // signaled by the ev_async callback when the other thread may access V8
+  mutex _proceedMutex;          // protects the _proceed condition
+  condition_variable _complete; // signaled by the other thread when it has completed processing
+  mutex _completeMutex;         // protects the _complete condition
+};
+
+// //////////////////////////////////////////////////////////////////////
+
 // Class PJSUA encapsulates the connection between Node and PJ
 
 class PJSUA
 {
   static Persistent<Function> _callback;
+  static Handle<Context> _callbackContext;
+  static NodeMutex _nodeMutex;
 
   // //////////////////////////////////////////////////////////////////////
   //
@@ -275,21 +331,21 @@ class PJSUA
     }
 
     TryCatch tryCatch;
-    _callback->Call(Context::GetCurrent()->Global(), argc + 1, args);
+    Local<Value> retval = _callback->Call(_callbackContext->Global(), argc + 1, args);
 
     if (tryCatch.HasCaught()) {
       FatalException(tryCatch);
     }
 
-    return *Undefined();                                     // fixme: Undefined?
+    return retval;
   }
 
   static void
   on_call_state(pjsua_call_id call_id,
                 pjsip_event *e)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("call_state", 1, getCallInfo(call_id));
   }
@@ -299,8 +355,8 @@ class PJSUA
                    pjsua_call_id call_id,
                    pjsip_rx_data *rdata)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("incoming_call", 3, getAccInfo(acc_id), getCallInfo(call_id), Undefined());                   
   }
@@ -310,8 +366,8 @@ class PJSUA
                     pjsip_transaction *tsx,
                     pjsip_event *e)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("tsx_state", 3, getCallInfo(call_id), Undefined(), Undefined());
   }
@@ -319,8 +375,8 @@ class PJSUA
   static void
   on_call_media_state(pjsua_call_id call_id)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("media_state", 1, getCallInfo(call_id));
   }
@@ -331,8 +387,8 @@ class PJSUA
                     unsigned stream_idx,
                     pjmedia_port **p_port)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("stream_created", 4, getCallInfo(call_id), Undefined(), Integer::New(stream_idx), Undefined());
   }
@@ -342,8 +398,8 @@ class PJSUA
                       pjmedia_session *sess,
                       unsigned stream_idx)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("stream_destroyed", 3, getCallInfo(call_id), Undefined(), Integer::New(stream_idx));
   }
@@ -352,8 +408,8 @@ class PJSUA
   on_dtmf_digit(pjsua_call_id call_id,
                 int digit)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("dtmf_digit", 2, getCallInfo(call_id), Integer::New(digit));
   }
@@ -363,8 +419,8 @@ class PJSUA
                            const pj_str_t *dst,
                            pjsip_status_code *code)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     Local<Value> result = invokeCallback("transfer_request", 3, getCallInfo(call_id), Undefined(), Undefined());
     *code = (pjsip_status_code) result->ToInteger()->Value();
@@ -377,8 +433,8 @@ class PJSUA
                           pj_bool_t final,
                           pj_bool_t *p_cont)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     Local<Value> result = invokeCallback("transfer_status", 4, getCallInfo(call_id), Integer::New(st_code),
                                          String::New(st_text->ptr, st_text->slen), Boolean::New(final));
@@ -391,8 +447,8 @@ class PJSUA
                           int *st_code,
                           pj_str_t *st_text)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     Local<Value> result = invokeCallback("call_replace_request", 2, getCallInfo(call_id), Undefined());
     *st_code = result->ToInteger()->Value();
@@ -403,8 +459,8 @@ class PJSUA
   on_call_replaced(pjsua_call_id old_call_id,
                    pjsua_call_id new_call_id)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("call_replaced", 2, getCallInfo(old_call_id), getCallInfo(new_call_id));
   }
@@ -412,8 +468,8 @@ class PJSUA
   static void
   on_reg_state(pjsua_acc_id acc_id)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("reg_state", 1, getAccInfo(acc_id));
   }
@@ -422,8 +478,8 @@ class PJSUA
   on_reg_state2(pjsua_acc_id acc_id,
                 pjsua_reg_info *info)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("reg_state2", 2, getAccInfo(acc_id), Undefined());
   }
@@ -438,8 +494,8 @@ class PJSUA
                         pj_str_t *reason,
                         pjsua_msg_data *msg_data)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     Local<Value> result = invokeCallback("incoming_subscribe", 5, getAccInfo(acc_id), Undefined(), Undefined(),
                                          String::New(from->ptr, from->slen), Undefined());
@@ -454,8 +510,8 @@ class PJSUA
                          pjsip_evsub_state state,
                          pjsip_event *event)
   {
-    Locker locker;
-    HandleScope scope;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
 
     invokeCallback("srv_subscribe_state", 5, getAccInfo(acc_id), Undefined(),
                    String::New(remote_uri->ptr, remote_uri->slen), Undefined(), Undefined());
@@ -590,11 +646,99 @@ private:
 
 // //////////////////////////////////////////////////////////////////////
 
-// Event instantiation
+Persistent<Function> PJSUA::_callback;
+Handle<Context> PJSUA::_callbackContext;
+NodeMutex PJSUA::_nodeMutex(Context::GetCurrent());
 
 // //////////////////////////////////////////////////////////////////////
 
-Persistent<Function> PJSUA::_callback;
+// PJSIP-Node-Thread synchronization
+
+// //////////////////////////////////////////////////////////////////////
+
+// NodeMutex::Lock is a scoped lock that locks out Node's thread,
+// i.e. when the instance has been constructed: Node's thread is
+// suspended during the life time of a NodeMutex::Lock instances.
+// Only one thread may create NodeSuspender instances, only one
+// instance may exist at any time.
+
+NodeMutex::Lock::Lock(NodeMutex& mutex)
+  : _mutex(mutex)
+{
+  _mutex.suspendNodeThread();
+
+  _locker = new Locker();
+  _scope = new Context::Scope(mutex.callbackContext());
+}
+
+NodeMutex::Lock::~Lock()
+{
+  delete _scope;
+  delete _locker;
+
+  _mutex.resumeNodeThread();
+}
+
+NodeMutex::NodeMutex(Handle<Context> callbackContext)
+  : _nodeThreadId(pthread_self()),
+    _callbackContext(callbackContext)
+{
+  ev_init(&_watcher, eventCallback);
+  _watcher.data = this;
+  ev_async_start(EV_DEFAULT_UC_ &_watcher);
+}
+
+NodeMutex::~NodeMutex()
+{
+  ev_async_stop(EV_DEFAULT_UC_ &_watcher);
+}
+
+void
+NodeMutex::eventCallback(EV_P_ ev_async* w, int revents)
+{
+  NodeMutex* nodeMutex = reinterpret_cast<NodeMutex*>(w->data);
+  nodeMutex->suspend();
+}
+
+void
+NodeMutex::suspend()
+{
+  Unlocker unlocker;
+
+  unique_lock<mutex> completeLock(_completeMutex);
+
+  {
+    unique_lock<mutex> proceedLock(_proceedMutex);
+    
+    _proceed.notify_one();
+  }
+
+  _complete.wait(completeLock);
+}
+
+void
+NodeMutex::suspendNodeThread()
+{
+  if (!pthread_equal(_nodeThreadId, pthread_self())) {
+    unique_lock<mutex> lock(_proceedMutex);
+
+    ev_async_send(EV_DEFAULT_ &_watcher);
+
+    _proceed.wait(lock);
+  }
+}
+
+void
+NodeMutex::resumeNodeThread()
+{
+  if (!pthread_equal(_nodeThreadId, pthread_self())) {
+    unique_lock<mutex> lock(_completeMutex);
+
+    _complete.notify_one();
+  }
+}
+
+// //////////////////////////////////////////////////////////////////////
 
 void
 PJSUA::Initialize(Handle<Object> target)
@@ -622,6 +766,7 @@ PJSUA::start(const Arguments& args)
     }
 
     _callback = Persistent<Function>::New(Local<Function>::Cast(args[0]));
+    _callbackContext = Context::GetCurrent();
 
     /* Init pjsua */
     {
