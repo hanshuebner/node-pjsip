@@ -703,17 +703,17 @@ NodeMutex::eventCallback(EV_P_ ev_async* w, int revents)
 void
 NodeMutex::suspend()
 {
-  Unlocker unlocker;
+  Unlocker unlocker;            // relinquish control over v8
 
   unique_lock<mutex> completeLock(_completeMutex);
 
   {
     unique_lock<mutex> proceedLock(_proceedMutex);
     
-    _proceed.notify_one();
+    _proceed.notify_one();      // tell the other thread to go ahead
   }
 
-  _complete.wait(completeLock);
+  _complete.wait(completeLock); // wait for the other thread to complete processing
 }
 
 void
@@ -724,7 +724,7 @@ NodeMutex::suspendNodeThread()
 
     ev_async_send(EV_DEFAULT_ &_watcher);
 
-    _proceed.wait(lock);
+    _proceed.wait(lock);        // wait until Node's thread is suspended
   }
 }
 
@@ -734,7 +734,7 @@ NodeMutex::resumeNodeThread()
   if (!pthread_equal(_nodeThreadId, pthread_self())) {
     unique_lock<mutex> lock(_completeMutex);
 
-    _complete.notify_one();
+    _complete.notify_one();     // tell Node's that that we're done
   }
 }
 
