@@ -721,6 +721,7 @@ NodeMutex::suspend()
     _proceed.notify_one();      // tell the other thread to go ahead
   }
 
+  // FIXME: _callbackContext needs to be released
   _complete.wait(completeLock); // wait for the other thread to complete processing
 }
 
