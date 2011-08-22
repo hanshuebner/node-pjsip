@@ -617,6 +617,7 @@ public:
 private:
   static Handle<Value> start(const Arguments& args);
   static Handle<Value> addAccount(const Arguments& args);
+  static Handle<Value> getAudioDevices(const Arguments& args);
   static Handle<Value> callAnswer(const Arguments& args);
   static Handle<Value> callMakeCall(const Arguments& args);
   static Handle<Value> callHangup(const Arguments& args);
@@ -755,6 +756,7 @@ PJSUA::Initialize(Handle<Object> target)
 
   target->Set(String::NewSymbol("start"), FunctionTemplate::New(start)->GetFunction());
   target->Set(String::NewSymbol("addAccount"), FunctionTemplate::New(addAccount)->GetFunction());
+  target->Set(String::NewSymbol("getAudioDevices"), FunctionTemplate::New(getAudioDevices)->GetFunction());
   target->Set(String::NewSymbol("callAnswer"), FunctionTemplate::New(callAnswer)->GetFunction());
   target->Set(String::NewSymbol("callMakeCall"), FunctionTemplate::New(callMakeCall)->GetFunction());
   target->Set(String::NewSymbol("callHangup"), FunctionTemplate::New(callHangup)->GetFunction());
@@ -882,6 +884,38 @@ PJSUA::addAccount(const Arguments& args)
       }
       return Integer::New(acc_id);
     }
+  }
+  catch (const JSException& e) {
+    return e.asV8Exception();
+  }
+}
+
+Handle<Value>
+PJSUA::getAudioDevices(const Arguments& args)
+{
+  HandleScope scope;
+  try {
+    pjmedia_aud_dev_info deviceInfosBinary[64];
+    unsigned deviceCount = 64;
+
+    pj_status_t status = pjsua_enum_aud_devs(deviceInfosBinary, &deviceCount);
+    if (status != PJ_SUCCESS) {
+      throw PJJSException("Error getting list of audio devices", status);
+    }
+
+    Local<Array> deviceInfos = Array::New();
+
+    for (unsigned i = 0; i < deviceCount; i++) {
+      pjmedia_aud_dev_info& deviceInfoBinary = deviceInfosBinary[i];
+      Local<Object> deviceInfo = Object::New();
+      deviceInfo->Set(String::NewSymbol("name"), String::New(deviceInfoBinary.name));
+      deviceInfo->Set(String::NewSymbol("input_count"), Integer::New(deviceInfoBinary.input_count));
+      deviceInfo->Set(String::NewSymbol("output_count"), Integer::New(deviceInfoBinary.output_count));
+      deviceInfo->Set(String::NewSymbol("default_samples_per_sec"), Integer::New(deviceInfoBinary.default_samples_per_sec));
+      deviceInfos->Set(i, deviceInfo);
+    }
+
+    return deviceInfos;
   }
   catch (const JSException& e) {
     return e.asV8Exception();
