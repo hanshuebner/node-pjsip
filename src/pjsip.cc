@@ -848,6 +848,7 @@ PJSUA::start(const Arguments& args)
 Handle<Value>
 PJSUA::addAccount(const Arguments& args)
 {
+  HandleScope scope;
   try {
     if (args.Length() != 3) {
       throw JSException("Invalid number of arguments to addAccount, need sipUser, sipDomain and sipPassword");
@@ -890,6 +891,7 @@ PJSUA::addAccount(const Arguments& args)
 Handle<Value>
 PJSUA::callAnswer(const Arguments& args)
 {
+  HandleScope scope;
   try {
     if (args.Length() < 1 || args.Length() > 4) {
       throw JSException("Invalid number of arguments to callAnswer (callId[, status[, reason[, msg_data]]])");
@@ -926,6 +928,7 @@ PJSUA::callAnswer(const Arguments& args)
 Handle<Value>
 PJSUA::callHangup(const Arguments& args)
 {
+  HandleScope scope;
   try {
     if (args.Length() < 1 || args.Length() > 4) {
       throw JSException("Invalid number of arguments to callHangup (callId[, status[, reason[, msg_data]]])");
@@ -960,6 +963,7 @@ PJSUA::callHangup(const Arguments& args)
 Handle<Value>
 PJSUA::callMakeCall(const Arguments& args)
 {
+  HandleScope scope;
   try {
     if (args.Length() < 2 || args.Length() > 5) {
       throw JSException("Invalid number of arguments to callMakeCall (accId, destUri[, options[, user_data[, msg_data]]])");
@@ -999,6 +1003,7 @@ PJSUA::callMakeCall(const Arguments& args)
 Handle<Value>
 PJSUA::stop(const Arguments& args)
 {
+  HandleScope scope;
   return Undefined();
 }
 
