@@ -143,6 +143,16 @@ private:
 
 // //////////////////////////////////////////////////////////////////////
 
+EnumMap<pjsua_call_media_status> mediaStatusNames((const char*[]) {
+    "MEDIA_NONE",
+      "MEDIA_ACTIVE",
+      "MEDIA_LOCAL_HOLD",
+      "MEDIA_REMOTE_HOLD",
+      "MEDIA_ERROR",
+      0});
+
+// //////////////////////////////////////////////////////////////////////
+
 static inline void
 setKey(Handle<Object> object, const char* key, const char* value, int length = -1)
 {
@@ -282,7 +292,7 @@ class PJSUA
     setKey(callInfo, "state_text", callInfoBinary.state_text);
     setKey(callInfo, "last_status", (int) callInfoBinary.last_status);
     setKey(callInfo, "last_status_text", callInfoBinary.last_status_text);
-    setKey(callInfo, "media_status", (int) callInfoBinary.media_status);
+    setKey(callInfo, "media_status", mediaStatusNames.idToName(callInfoBinary.media_status));
     setKey(callInfo, "media_dir", (int) callInfoBinary.media_dir);
     setKey(callInfo, "conf_slot", (int) callInfoBinary.conf_slot);
     setKey(callInfo, "connect_duration", PJ_TIME_VAL_TO_DOUBLE(callInfoBinary.connect_duration));
