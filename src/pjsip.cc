@@ -232,6 +232,17 @@ public:
     bool _hasSuspendedNode;
   };
 
+  class Unlock
+  {
+  public:
+    Unlock(NodeMutex& mutex);
+    ~Unlock();
+
+  private:
+    NodeMutex& _mutex;
+  };
+
+  friend class Unlock;
   friend class Lock;
 
   // Note:  NodeMutex instances must be created from within Node's thread.
@@ -265,8 +276,8 @@ private:
   static bool _nodeSuspended;   // Set when node has been suspended
 };
 
-static mutex NodeMutex::_globalMutex;
-static bool NodeMutex::_nodeSuspended;
+mutex NodeMutex::_globalMutex;
+bool NodeMutex::_nodeSuspended;
 
 // //////////////////////////////////////////////////////////////////////
 
@@ -366,7 +377,7 @@ class PJSUA
     NodeMutex::Lock lock(_nodeMutex);
     HandleScope handleScope;
 
-    _nodeMutex.invokeCallback("tsx_state", 3, getCallInfo(call_id), Undefined(), Undefined());
+    _nodeMutex.invokeCallback("call_tsx_state", 3, getCallInfo(call_id), Undefined(), Undefined());
   }
 
   static void
@@ -419,7 +430,7 @@ class PJSUA
     NodeMutex::Lock lock(_nodeMutex);
     HandleScope handleScope;
 
-    Local<Value> result = _nodeMutex.invokeCallback("transfer_request", 3, getCallInfo(call_id), Undefined(), Undefined());
+    Local<Value> result = _nodeMutex.invokeCallback("call_transfer_request", 3, getCallInfo(call_id), Undefined(), Undefined());
     *code = (pjsip_status_code) result->ToInteger()->Value();
   }
 
@@ -433,7 +444,7 @@ class PJSUA
     NodeMutex::Lock lock(_nodeMutex);
     HandleScope handleScope;
 
-    Local<Value> result = _nodeMutex.invokeCallback("transfer_status", 4, getCallInfo(call_id), Integer::New(st_code),
+    Local<Value> result = _nodeMutex.invokeCallback("call_transfer_status", 4, getCallInfo(call_id), Integer::New(st_code),
                                                     String::New(st_text->ptr, st_text->slen), Boolean::New(final));
     *p_cont = result->ToBoolean()->Value();
   }
@@ -602,6 +613,7 @@ class PJSUA
   static void
   on_nat_detect(const pj_stun_nat_detect_result *res)
   {
+    cout << "=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= on_nat_detect handler called" << endl;
     // FIXME: NYI
   }
 
@@ -659,21 +671,21 @@ NodeMutex PJSUA::_nodeMutex;
 // condition variables, the Lock instance also locks V8 using
 // v8::Locker and enters the context of the callback.
 
-NodeMutex::Lock::Lock(NodeMutex& mutex)
+NodeMutex::Lock::Lock(NodeMutex& m)
   : unique_lock<mutex>(_globalMutex),
-    _mutex(mutex),
+    _mutex(m),
+    _scope(0),
     _hasSuspendedNode(false)
 {
-  cout << "suspending node thread" << endl;
-  if () {
-  if (!_nodeSuspended && !pthread_equal(_nodeThreadId, pthread_self())) {
+  bool inNodeThread = pthread_equal(_mutex._nodeThreadId, pthread_self());
+  if (!_nodeSuspended && !inNodeThread) {
     _mutex.suspendNodeThread();
     _hasSuspendedNode = true;
     _nodeSuspended = true;
   }
 
   _locker = new Locker();
-  _scope = new Context::Scope(mutex._callbackContext);
+  _scope = new Context::Scope(inNodeThread ? Persistent<Context>::New(Context::GetCurrent()) : _mutex._callbackContext);
 }
 
 NodeMutex::Lock::~Lock()
@@ -683,8 +695,19 @@ NodeMutex::Lock::~Lock()
 
   if (_hasSuspendedNode) {
     _mutex.resumeNodeThread();
+    _nodeSuspended = false;
   }
-  cout << "node thread resumed" << endl;
+}
+
+NodeMutex::Unlock::Unlock(NodeMutex& m)
+  : _mutex(m)
+{
+  _mutex._globalMutex.unlock();
+}
+
+NodeMutex::Unlock::~Unlock()
+{
+  _mutex._globalMutex.lock();
 }
 
 NodeMutex::NodeMutex()
@@ -718,6 +741,7 @@ NodeMutex::invokeCallback(const char* eventName, int argc, ...)
     args[i + 1] = *va_arg(vl, Handle<Value>);
   }
 
+  NodeMutex::Unlock unlock(*this);
   TryCatch tryCatch;
   Local<Value> retval = _callback->Call(_callbackContext->Global(), argc + 1, args);
 
@@ -751,34 +775,26 @@ NodeMutex::suspend()
     _proceed.notify_one();      // tell the other thread to go ahead
   }
 
-  // FIXME: _callbackContext needs to be released
   _complete.wait(completeLock); // wait for the other thread to complete processing
+  // FIXME: _callbackContext needs to be released
 }
 
-bool
+void
 NodeMutex::suspendNodeThread()
 {
-  if (!pthread_equal(_nodeThreadId, pthread_self())) {
-    unique_lock<mutex> lock(_proceedMutex);
+  unique_lock<mutex> lock(_proceedMutex);
 
-    ev_async_send(EV_DEFAULT_ &_watcher);
+  ev_async_send(EV_DEFAULT_ &_watcher);
 
-    _proceed.wait(lock);        // wait until Node's thread is suspended
-
-    return true;
-  } else {
-    return false;
-  }
+  _proceed.wait(lock);        // wait until Node's thread is suspended
 }
 
 void
 NodeMutex::resumeNodeThread()
 {
-  if (!pthread_equal(_nodeThreadId, pthread_self())) {
-    unique_lock<mutex> lock(_completeMutex);
+  unique_lock<mutex> lock(_completeMutex);
 
-    _complete.notify_one();     // tell Node's that that we're done
-  }
+  _complete.notify_one();     // tell Node's that that we're done
 }
 
 // //////////////////////////////////////////////////////////////////////
@@ -802,11 +818,18 @@ PJSUA::start(const Arguments& args)
 {
   HandleScope scope;
   try {
+    Local<Object> options = Object::New();
 
-    if (args.Length() > 0) {
+    switch (args.Length()) {
+    case 2:
+      options = args[1]->ToObject();
+    case 1:
       if (!args[0]->IsFunction()) {
         throw JSException("need callback function as argument");
       }
+      break;
+    default:
+      throw JSException("unexpected number of arguments to PJSUA::start");
     }
 
     _nodeMutex.setCallback(Local<Function>::Cast(args[0]));
@@ -846,7 +869,18 @@ PJSUA::start(const Arguments& args)
       cfg.cb.on_ice_transport_error = on_ice_transport_error;
 
       pjsua_logging_config_default(&log_cfg);
+
       log_cfg.console_level = 1;
+      if (options->Has(String::NewSymbol("console_log_level"))) {
+        log_cfg.console_level = options->Get(String::NewSymbol("console_log_level"))->ToUint32()->Value();
+      }
+
+      string stunServer;
+      if (options->Has(String::NewSymbol("stun_server"))) {
+        stunServer = *String::Utf8Value(options->Get(String::NewSymbol("stun_server")));
+        cfg.stun_srv[0] = pj_str((char*) stunServer.c_str());
+        cfg.stun_srv_cnt = 1;
+      }
 
       pj_status_t status = pjsua_init(&cfg, &log_cfg, NULL);
       if (status != PJ_SUCCESS) {
@@ -884,6 +918,7 @@ PJSUA::start(const Arguments& args)
 Handle<Value>
 PJSUA::addAccount(const Arguments& args)
 {
+  NodeMutex::Lock lock(_nodeMutex);
   HandleScope scope;
   try {
     if (args.Length() != 3) {
@@ -911,10 +946,14 @@ PJSUA::addAccount(const Arguments& args)
       cfg.cred_info[0].username = pj_str((char*) sipUser.c_str());
       cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
       cfg.cred_info[0].data = pj_str((char*) sipPassword.c_str());
+      cfg.allow_contact_rewrite = 1;
 
-      pj_status_t status = pjsua_acc_add(&cfg, PJ_TRUE, &acc_id);
-      if (status != PJ_SUCCESS) {
-        throw PJJSException("Error adding account", status);
+      {
+        NodeMutex::Unlock lock(_nodeMutex);
+        pj_status_t status = pjsua_acc_add(&cfg, PJ_TRUE, &acc_id);
+        if (status != PJ_SUCCESS) {
+          throw PJJSException("Error adding account", status);
+        }
       }
       return Integer::New(acc_id);
     }
@@ -959,6 +998,7 @@ PJSUA::getAudioDevices(const Arguments& args)
 Handle<Value>
 PJSUA::callAnswer(const Arguments& args)
 {
+  NodeMutex::Lock lock(_nodeMutex);
   HandleScope scope;
   try {
     if (args.Length() < 1 || args.Length() > 4) {
@@ -982,7 +1022,7 @@ PJSUA::callAnswer(const Arguments& args)
     }
 
     {
-      Unlocker unlocker;            // relinquish control over v8 as we may trigger a synchronous callback
+      NodeMutex::Unlock lock(_nodeMutex);                   // pjsua_call_answer will probably generate events
 
       pj_status_t status = pjsua_call_answer(call_id, code, reason, msg_data);
       if (status != PJ_SUCCESS) {
@@ -1000,6 +1040,7 @@ PJSUA::callAnswer(const Arguments& args)
 Handle<Value>
 PJSUA::callHangup(const Arguments& args)
 {
+  NodeMutex::Lock lock(_nodeMutex);
   HandleScope scope;
   try {
     if (args.Length() < 1 || args.Length() > 4) {
@@ -1020,9 +1061,13 @@ PJSUA::callHangup(const Arguments& args)
       code = args[1]->Int32Value();
     }
 
-    pj_status_t status = pjsua_call_hangup(call_id, code, reason, msg_data);
-    if (status != PJ_SUCCESS) {
-      throw PJJSException("Error hanging up", status);
+    {
+      NodeMutex::Unlock lock(_nodeMutex);                   // pjsua_call_hangup can probably generate events
+
+      pj_status_t status = pjsua_call_hangup(call_id, code, reason, msg_data);
+      if (status != PJ_SUCCESS) {
+        throw PJJSException("Error hanging up", status);
+      }
     }
 
     return Undefined();
