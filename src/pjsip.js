@@ -71,3 +71,19 @@ exports.SC_NOT_ACCEPTABLE_ANYWHERE = 606;
 
 exports.SC_TSX_TIMEOUT = exports.SC_REQUEST_TIMEOUT;
 exports.SC_TSX_TRANSPORT_ERROR = exports.SC_SERVICE_UNAVAILABLE;
+
+exports.CALL_STATE = {
+    NULL: 0,
+    CALLING: 1,
+    INCOMING: 2,
+    EARLY: 3,
+    CONNECTING: 4,
+    CONFIRMED: 5,
+    DISCONNCTD: 6,
+    TERMINATED: 7
+};
+
+var nextCallInstanceId = 0x40000000;
+exports.generateCallInstanceId = function () {
+    return nextCallInstanceId++;
+}
