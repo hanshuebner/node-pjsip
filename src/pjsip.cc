@@ -209,6 +209,7 @@ class NodeMutex
 {
 public:
   class Lock
+    : unique_lock<mutex>
   {
   public:
     Lock(NodeMutex& mutex);
@@ -218,6 +219,7 @@ public:
     NodeMutex& _mutex;
     Locker* _locker;
     Context::Scope* _scope;
+    bool _hasSuspendedNode;
   };
 
   friend class Lock;
@@ -248,7 +250,13 @@ private:
   mutex _proceedMutex;          // protects the _proceed condition
   condition_variable _complete; // signaled by the other thread when it has completed processing
   mutex _completeMutex;         // protects the _complete condition
+
+  static mutex _globalMutex;    // Locked whenever a callback is executed
+  static bool _nodeSuspended;   // Set when node has been suspended
 };
+
+static mutex NodeMutex::_globalMutex;
+static bool NodeMutex::_nodeSuspended;
 
 // //////////////////////////////////////////////////////////////////////
 
@@ -641,9 +649,17 @@ NodeMutex PJSUA::_nodeMutex;
 // v8::Locker and enters the context of the callback.
 
 NodeMutex::Lock::Lock(NodeMutex& mutex)
-  : _mutex(mutex)
+  : unique_lock<mutex>(_globalMutex),
+    _mutex(mutex),
+    _hasSuspendedNode(false)
 {
-  _mutex.suspendNodeThread();
+  cout << "suspending node thread" << endl;
+  if () {
+  if (!_nodeSuspended && !pthread_equal(_nodeThreadId, pthread_self())) {
+    _mutex.suspendNodeThread();
+    _hasSuspendedNode = true;
+    _nodeSuspended = true;
+  }
 
   _locker = new Locker();
   _scope = new Context::Scope(mutex._callbackContext);
@@ -654,7 +670,10 @@ NodeMutex::Lock::~Lock()
   delete _scope;
   delete _locker;
 
-  _mutex.resumeNodeThread();
+  if (_hasSuspendedNode) {
+    _mutex.resumeNodeThread();
+  }
+  cout << "node thread resumed" << endl;
 }
 
 NodeMutex::NodeMutex()
@@ -724,7 +743,7 @@ NodeMutex::suspend()
   _complete.wait(completeLock); // wait for the other thread to complete processing
 }
 
-void
+bool
 NodeMutex::suspendNodeThread()
 {
   if (!pthread_equal(_nodeThreadId, pthread_self())) {
@@ -733,6 +752,10 @@ NodeMutex::suspendNodeThread()
     ev_async_send(EV_DEFAULT_ &_watcher);
 
     _proceed.wait(lock);        // wait until Node's thread is suspended
+
+    return true;
+  } else {
+    return false;
   }
 }
 
@@ -911,9 +934,13 @@ PJSUA::callAnswer(const Arguments& args)
       call_id = args[0]->Int32Value();
     }
 
-    pj_status_t status = pjsua_call_answer(call_id, code, reason, msg_data);
-    if (status != PJ_SUCCESS) {
-      throw PJJSException("Error answering call", status);
+    {
+      Unlocker unlocker;            // relinquish control over v8 as we may trigger a synchronous callback
+
+      pj_status_t status = pjsua_call_answer(call_id, code, reason, msg_data);
+      if (status != PJ_SUCCESS) {
+        throw PJJSException("Error answering call", status);
+      }
     }
 
     return Undefined();
