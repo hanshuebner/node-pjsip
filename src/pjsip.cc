@@ -151,6 +151,18 @@ EnumMap<pjsua_call_media_status> mediaStatusNames((const char*[]) {
       "MEDIA_ERROR",
       0});
 
+EnumMap<pj_stun_nat_type> natTypeNames((const char*[]) {
+    "UNKNOWN",
+      "ERR_UNKNOWN",
+      "OPEN",
+      "BLOCKED",
+      "SYMMETRIC_UDP",
+      "FULL_CONE",
+      "SYMMETRIC",
+      "RESTRICTED",
+      "PORT_RESTRICTED",
+      0});
+
 // //////////////////////////////////////////////////////////////////////
 
 static inline void
@@ -613,7 +625,12 @@ class PJSUA
   static void
   on_nat_detect(const pj_stun_nat_detect_result *res)
   {
-    cout << "=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= on_nat_detect handler called" << endl;
+    NodeMutex::Lock lock(_nodeMutex);
+    HandleScope handleScope;
+
+    _nodeMutex.invokeCallback("nat_detect", 2,
+                              (res->status == PJ_SUCCESS) ? Undefined() : String::New(res->status_text),
+                              String::New(natTypeNames.idToName(res->nat_type)));
     // FIXME: NYI
   }
 
