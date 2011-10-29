@@ -263,8 +263,15 @@ private:
 
   pthread_t _nodeThreadId;      // thread ID of node's thread
 
-  Persistent<Function> _callback;
-  Persistent<Context> _callbackContext;
+  Persistent<Function> _callback;                           // JavaScript callback function
+
+  // The Mutex holds a reference to the callback context that the
+  // Javascript callback should be called within in the
+  // _callbackContext member variable.  It is set from the
+  // Lock::Lock() constructor when the C++ callback is received from
+  // within Node's thread, or from NodeMutex::suspend() when the C++
+  // callback is received from within another thread.
+  Persistent<Context> _callbackContext;                     // Global context to run callback in
 
   ev_async _watcher;            // signalled by the other thread to suspend Node's thread
   condition_variable _proceed;  // signaled by the ev_async callback when the other thread may access V8
@@ -679,13 +686,16 @@ NodeMutex::Lock::Lock(NodeMutex& m)
 {
   bool inNodeThread = pthread_equal(_mutex._nodeThreadId, pthread_self());
   if (!_nodeSuspended && !inNodeThread) {
+    // suspendNodeThread() sets _callbackContext as a side effect
     _mutex.suspendNodeThread();
     _hasSuspendedNode = true;
     _nodeSuspended = true;
+  } else {
+    _mutex._callbackContext = Persistent<Context>::New(Context::GetCurrent());
   }
 
   _locker = new Locker();
-  _scope = new Context::Scope(inNodeThread ? Persistent<Context>::New(Context::GetCurrent()) : _mutex._callbackContext);
+  _scope = new Context::Scope(_mutex._callbackContext);
 }
 
 NodeMutex::Lock::~Lock()
