@@ -703,7 +703,7 @@ NodeMutex::Lock::Lock(NodeMutex& m)
 {
   bool inNodeThread = pthread_equal(_mutex._nodeThreadId, pthread_self());
   if (!_nodeSuspended && !inNodeThread) {
-    // suspendNodeThread() sets _callbackContext as a side effect
+    // suspendNodeThread() sets _mutex._callbackContext as a side effect
     _mutex.suspendNodeThread();
     _hasSuspendedNode = true;
     _nodeSuspended = true;
