@@ -698,10 +698,12 @@ NodeMutex PJSUA::_nodeMutex;
 NodeMutex::Lock::Lock(NodeMutex& m)
   : unique_lock<mutex>(_globalMutex),
     _mutex(m),
+    _locker(0),
     _scope(0),
     _hasSuspendedNode(false)
 {
   bool inNodeThread = pthread_equal(_mutex._nodeThreadId, pthread_self());
+
   if (!_nodeSuspended && !inNodeThread) {
     // suspendNodeThread() sets _mutex._callbackContext as a side effect
     _mutex.suspendNodeThread();
@@ -711,7 +713,9 @@ NodeMutex::Lock::Lock(NodeMutex& m)
     _mutex._callbackContext = Persistent<Context>::New(Context::GetCurrent());
   }
 
-  _locker = new Locker();
+  if (!inNodeThread) {
+    _locker = new Locker();
+  }
   _scope = new Context::Scope(_mutex._callbackContext);
 }
 
@@ -1151,6 +1155,14 @@ PJSUA::stop(const Arguments& args)
   return Undefined();
 }
 
+
+void
+handleFatalV8Error(const char* location,
+                   const char* message) {
+  cout << "Fatal V8 error at " << location << ": " << message << endl;
+  abort();
+}
+
 extern "C" {
 
   static void uninit()
@@ -1165,6 +1177,7 @@ extern "C" {
       abort();
     }
     PJSUA::Initialize(target);
+    v8::V8::SetFatalErrorHandler(handleFatalV8Error);
     atexit(uninit);
   }
 
