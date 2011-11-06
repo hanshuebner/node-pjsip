@@ -83,7 +83,7 @@ exports.CALL_STATE = {
     TERMINATED: 7
 };
 
-var nextCallInstanceId = 0x80000000;
+var nextCallInstanceId = 0x40000000;
 exports.generateCallInstanceId = function () {
     return nextCallInstanceId++;
 }
