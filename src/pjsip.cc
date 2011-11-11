@@ -307,6 +307,9 @@ class PJSUA
   static Persistent<Function> _callback;
   static NodeMutex _nodeMutex;
 
+  //
+  static pj_pool_t* _tonePool;
+
   // //////////////////////////////////////////////////////////////////////
   //
   // Callback functions to be called by PJ
@@ -672,6 +675,7 @@ private:
   static Handle<Value> start(const Arguments& args);
   static Handle<Value> addAccount(const Arguments& args);
   static Handle<Value> getAudioDevices(const Arguments& args);
+  static Handle<Value> setAudioDeviceIndex(const Arguments& args);
   static Handle<Value> callAnswer(const Arguments& args);
   static Handle<Value> callMakeCall(const Arguments& args);
   static Handle<Value> callHangup(const Arguments& args);
@@ -680,6 +684,9 @@ private:
 
 // //////////////////////////////////////////////////////////////////////
 
+// Static member allocation
+
+pj_pool_t* PJSUA::_tonePool;
 NodeMutex PJSUA::_nodeMutex;
 
 // //////////////////////////////////////////////////////////////////////
@@ -838,6 +845,7 @@ PJSUA::Initialize(Handle<Object> target)
   target->Set(String::NewSymbol("start"), FunctionTemplate::New(start)->GetFunction());
   target->Set(String::NewSymbol("addAccount"), FunctionTemplate::New(addAccount)->GetFunction());
   target->Set(String::NewSymbol("getAudioDevices"), FunctionTemplate::New(getAudioDevices)->GetFunction());
+  target->Set(String::NewSymbol("setAudioDeviceIndex"), FunctionTemplate::New(setAudioDeviceIndex)->GetFunction());
   target->Set(String::NewSymbol("callAnswer"), FunctionTemplate::New(callAnswer)->GetFunction());
   target->Set(String::NewSymbol("callMakeCall"), FunctionTemplate::New(callMakeCall)->GetFunction());
   target->Set(String::NewSymbol("callHangup"), FunctionTemplate::New(callHangup)->GetFunction());
@@ -939,6 +947,9 @@ PJSUA::start(const Arguments& args)
       }
     }
 
+    /* create pool for tones tones */
+    _tonePool = pjsua_pool_create("phonode", 4096, 4096);
+
     return Undefined();
   }
   catch (const JSException& e) {
@@ -1003,6 +1014,7 @@ PJSUA::getAudioDevices(const Arguments& args)
     unsigned deviceCount = 64;
 
     pj_status_t status = pjsua_enum_aud_devs(deviceInfosBinary, &deviceCount);
+
     if (status != PJ_SUCCESS) {
       throw PJJSException("Error getting list of audio devices", status);
     }
@@ -1032,7 +1044,7 @@ PJSUA::callAnswer(const Arguments& args)
   NodeMutex::Lock lock(_nodeMutex);
   HandleScope scope;
   try {
-    if (args.Length() < 1 || args.Length() > 4) {
+    if (args.Length() < 2 || args.Length() > 4) {
       throw JSException("Invalid number of arguments to callAnswer (callId[, status[, reason[, msg_data]]])");
     }
 
@@ -1155,6 +1167,27 @@ PJSUA::stop(const Arguments& args)
   return Undefined();
 }
 
+Handle<Value>
+PJSUA::setAudioDeviceIndex(const Arguments& args)
+{
+  HandleScope scope;
+  try {
+    if (args.Length() != 1) {
+      throw JSException("Invalid number of arguments to setSoundDevice(devId)");
+    }
+    const int devId = args[0]->Int32Value();
+    pj_status_t status = pjsua_set_snd_dev(devId, devId);
+    if (status != PJ_SUCCESS) {
+      throw PJJSException("Error setting sound device", status);
+    }
+  }
+  catch (const JSException& e) {
+    return e.asV8Exception();
+  }
+
+  return Undefined();
+}
+  
 
 void
 handleFatalV8Error(const char* location,
