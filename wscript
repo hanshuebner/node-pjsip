@@ -8,7 +8,7 @@ libs = [ lib + '-' + target for lib in
          [ 'pjsua', 'pjsip-ua', 'pjsip-simple', 'pjsip', 'pjmedia-codec', 'pjmedia',
            'pjmedia-audiodev', 'pjnath', 'pjlib-util', 'resample', 'milenage', 'srtp',
            'gsmcodec', 'speex', 'ilbccodec', 'portaudio', 'pj' ]
-         ] + ['m', 'nsl', 'rt', 'pthread', 'asound', 'uuid']
+         ] + ['m', 'nsl', 'rt', 'pthread', 'asound']
 
 
 def set_options(opt):

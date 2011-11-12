@@ -29,8 +29,6 @@
 
 #include <v8.h>
 #include <node.h>
-#include <node_events.h>                                    // needed?
-#include <node/ev.h>                                        // needed?
 
 // prevent name clash between pjsua.h and node.h
 #define pjsip_module pjsip_module_

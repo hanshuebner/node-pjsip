@@ -1,3 +1,0 @@
-[submodule "lib/static-resource"]
-	path = lib/static-resource
-	url = https://github.com/atsuya/static-resource.git
