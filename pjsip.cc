@@ -406,7 +406,7 @@ class PJSUA
     NodeMutex::Lock lock(_nodeMutex);
     HandleScope handleScope;
 
-    _nodeMutex.invokeCallback("media_state", 1, getCallInfo(call_id));
+    _nodeMutex.invokeCallback("call_media_state", 1, getCallInfo(call_id));
   }
 
   static void
@@ -674,6 +674,7 @@ private:
   static Handle<Value> addAccount(const Arguments& args);
   static Handle<Value> getAudioDevices(const Arguments& args);
   static Handle<Value> setAudioDeviceIndex(const Arguments& args);
+  static Handle<Value> confConnect(const Arguments& args);
   static Handle<Value> callAnswer(const Arguments& args);
   static Handle<Value> callMakeCall(const Arguments& args);
   static Handle<Value> callHangup(const Arguments& args);
@@ -844,6 +845,7 @@ PJSUA::Initialize(Handle<Object> target)
   target->Set(String::NewSymbol("addAccount"), FunctionTemplate::New(addAccount)->GetFunction());
   target->Set(String::NewSymbol("getAudioDevices"), FunctionTemplate::New(getAudioDevices)->GetFunction());
   target->Set(String::NewSymbol("setAudioDeviceIndex"), FunctionTemplate::New(setAudioDeviceIndex)->GetFunction());
+  target->Set(String::NewSymbol("confConnect"), FunctionTemplate::New(confConnect)->GetFunction());
   target->Set(String::NewSymbol("callAnswer"), FunctionTemplate::New(callAnswer)->GetFunction());
   target->Set(String::NewSymbol("callMakeCall"), FunctionTemplate::New(callMakeCall)->GetFunction());
   target->Set(String::NewSymbol("callHangup"), FunctionTemplate::New(callHangup)->GetFunction());
@@ -1042,7 +1044,7 @@ PJSUA::callAnswer(const Arguments& args)
   NodeMutex::Lock lock(_nodeMutex);
   HandleScope scope;
   try {
-    if (args.Length() < 2 || args.Length() > 4) {
+    if (args.Length() < 1 || args.Length() > 4) {
       throw JSException("Invalid number of arguments to callAnswer (callId[, status[, reason[, msg_data]]])");
     }
 
@@ -1166,17 +1168,18 @@ PJSUA::stop(const Arguments& args)
 }
 
 Handle<Value>
-PJSUA::setAudioDeviceIndex(const Arguments& args)
+PJSUA::confConnect(const Arguments& args)
 {
   HandleScope scope;
   try {
-    if (args.Length() != 1) {
-      throw JSException("Invalid number of arguments to setSoundDevice(devId)");
+    if (args.Length() != 2) {
+      throw JSException("Invalid number of arguments to confConnect(source, sink)");
     }
-    const int devId = args[0]->Int32Value();
-    pj_status_t status = pjsua_set_snd_dev(devId, devId);
+    const pjsua_conf_port_id source = args[0]->Int32Value();
+    const pjsua_conf_port_id sink = args[1]->Int32Value();
+    pj_status_t status = pjsua_conf_connect(source, sink);
     if (status != PJ_SUCCESS) {
-      throw PJJSException("Error setting sound device", status);
+      throw PJJSException("Error connecting media", status);
     }
   }
   catch (const JSException& e) {
@@ -1186,7 +1189,27 @@ PJSUA::setAudioDeviceIndex(const Arguments& args)
   return Undefined();
 }
   
+Handle<Value>
+PJSUA::setAudioDeviceIndex(const Arguments& args)
+{
+  HandleScope scope;
+  try {
+    if (args.Length() != 1) {
+      throw JSException("Invalid number of arguments to setAudioDeviceIndex(devId)");
+    }
+    const int devId = args[0]->Int32Value();
+    pj_status_t status = pjsua_set_snd_dev(devId, devId);
+    if (status != PJ_SUCCESS) {
+      throw PJJSException("Error setting audio device index", status);
+    }
+  }
+  catch (const JSException& e) {
+    return e.asV8Exception();
+  }
 
+  return Undefined();
+}
+  
 void
 handleFatalV8Error(const char* location,
                    const char* message) {
