@@ -33,6 +33,7 @@
 // prevent name clash between pjsua.h and node.h
 #define pjsip_module pjsip_module_
 #include <pjsua-lib/pjsua.h>
+#include <pjsua-lib/pjsua_internal.h>
 #undef pjsip_module
 
 #include "mutex.h"                                          // needed?
@@ -306,7 +307,32 @@ class PJSUA
   static NodeMutex _nodeMutex;
 
   //
-  static pj_pool_t* _tonePool;
+  static pjsip_dialog* _lockedDlg;
+
+  // PJSUA call locking function
+  // http://trac.pjsip.org/repos/wiki/PJSUA_Locks
+
+  static void
+  lockCall(pjsua_call_id callId)
+  {
+    assert(!_lockedDlg);
+    pjsua_call* call;
+    pj_status_t status = acquire_call("node-pjsip",
+                                      callId,
+                                      &call,
+                                      &_lockedDlg);
+    if (status != PJ_SUCCESS) {
+        throw PJJSException("Error locking call", status);
+    }
+  }
+
+  static void
+  unlockCall()
+  {
+    assert(_lockedDlg);
+    pjsip_dlg_dec_lock(_lockedDlg);
+    _lockedDlg = 0;
+  }
 
   // //////////////////////////////////////////////////////////////////////
   //
@@ -685,7 +711,7 @@ private:
 
 // Static member allocation
 
-pj_pool_t* PJSUA::_tonePool;
+pjsip_dialog* PJSUA::_lockedDlg;
 NodeMutex PJSUA::_nodeMutex;
 
 // //////////////////////////////////////////////////////////////////////
@@ -947,9 +973,6 @@ PJSUA::start(const Arguments& args)
       }
     }
 
-    /* create pool for tones tones */
-    _tonePool = pjsua_pool_create("phonode", 4096, 4096);
-
     return Undefined();
   }
   catch (const JSException& e) {
@@ -1041,7 +1064,6 @@ PJSUA::getAudioDevices(const Arguments& args)
 Handle<Value>
 PJSUA::callAnswer(const Arguments& args)
 {
-  NodeMutex::Lock lock(_nodeMutex);
   HandleScope scope;
   try {
     if (args.Length() < 1 || args.Length() > 4) {
@@ -1064,14 +1086,20 @@ PJSUA::callAnswer(const Arguments& args)
       call_id = args[0]->Int32Value();
     }
 
+    lockCall(call_id);
+    // fixme: why lock/unlock?
     {
-      NodeMutex::Unlock lock(_nodeMutex);                   // pjsua_call_answer will probably generate events
+      NodeMutex::Lock lock(_nodeMutex);
+      {
+        NodeMutex::Unlock lock(_nodeMutex);                   // pjsua_call_answer will probably generate events
 
-      pj_status_t status = pjsua_call_answer(call_id, code, reason, msg_data);
-      if (status != PJ_SUCCESS) {
-        throw PJJSException("Error answering call", status);
+        pj_status_t status = pjsua_call_answer(call_id, code, reason, msg_data);
+        if (status != PJ_SUCCESS) {
+          throw PJJSException("Error answering call", status);
+        }
       }
     }
+    unlockCall();
 
     return Undefined();
   }
@@ -1083,7 +1111,6 @@ PJSUA::callAnswer(const Arguments& args)
 Handle<Value>
 PJSUA::callHangup(const Arguments& args)
 {
-  NodeMutex::Lock lock(_nodeMutex);
   HandleScope scope;
   try {
     if (args.Length() < 1 || args.Length() > 4) {
@@ -1104,14 +1131,19 @@ PJSUA::callHangup(const Arguments& args)
       code = args[1]->Int32Value();
     }
 
-    {
-      NodeMutex::Unlock lock(_nodeMutex);                   // pjsua_call_hangup can probably generate events
+    lockCall(call_id);
+    { // fixme: why lock/unlock?
+      NodeMutex::Lock lock(_nodeMutex);
+      {
+        NodeMutex::Unlock lock(_nodeMutex);                   // pjsua_call_hangup can probably generate events
 
-      pj_status_t status = pjsua_call_hangup(call_id, code, reason, msg_data);
-      if (status != PJ_SUCCESS) {
-        throw PJJSException("Error hanging up", status);
+        pj_status_t status = pjsua_call_hangup(call_id, code, reason, msg_data);
+        if (status != PJ_SUCCESS) {
+          throw PJJSException("Error hanging up", status);
+        }
       }
     }
+    unlockCall();
 
     return Undefined();
   }
