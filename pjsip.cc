@@ -306,34 +306,6 @@ class PJSUA
   static Persistent<Function> _callback;
   static NodeMutex _nodeMutex;
 
-  //
-  static pjsip_dialog* _lockedDlg;
-
-  // PJSUA call locking function
-  // http://trac.pjsip.org/repos/wiki/PJSUA_Locks
-
-  static void
-  lockCall(pjsua_call_id callId)
-  {
-    assert(!_lockedDlg);
-    pjsua_call* call;
-    pj_status_t status = acquire_call("node-pjsip",
-                                      callId,
-                                      &call,
-                                      &_lockedDlg);
-    if (status != PJ_SUCCESS) {
-        throw PJJSException("Error locking call", status);
-    }
-  }
-
-  static void
-  unlockCall()
-  {
-    assert(_lockedDlg);
-    pjsip_dlg_dec_lock(_lockedDlg);
-    _lockedDlg = 0;
-  }
-
   // //////////////////////////////////////////////////////////////////////
   //
   // Callback functions to be called by PJ
@@ -711,7 +683,6 @@ private:
 
 // Static member allocation
 
-pjsip_dialog* PJSUA::_lockedDlg;
 NodeMutex PJSUA::_nodeMutex;
 
 // //////////////////////////////////////////////////////////////////////
@@ -1086,20 +1057,10 @@ PJSUA::callAnswer(const Arguments& args)
       call_id = args[0]->Int32Value();
     }
 
-    lockCall(call_id);
-    // fixme: why lock/unlock?
-    {
-      NodeMutex::Lock lock(_nodeMutex);
-      {
-        NodeMutex::Unlock lock(_nodeMutex);                   // pjsua_call_answer will probably generate events
-
-        pj_status_t status = pjsua_call_answer(call_id, code, reason, msg_data);
-        if (status != PJ_SUCCESS) {
-          throw PJJSException("Error answering call", status);
-        }
-      }
+    pj_status_t status = pjsua_call_answer(call_id, code, reason, msg_data);
+    if (status != PJ_SUCCESS) {
+      throw PJJSException("Error answering call", status);
     }
-    unlockCall();
 
     return Undefined();
   }
@@ -1131,19 +1092,10 @@ PJSUA::callHangup(const Arguments& args)
       code = args[1]->Int32Value();
     }
 
-    lockCall(call_id);
-    { // fixme: why lock/unlock?
-      NodeMutex::Lock lock(_nodeMutex);
-      {
-        NodeMutex::Unlock lock(_nodeMutex);                   // pjsua_call_hangup can probably generate events
-
-        pj_status_t status = pjsua_call_hangup(call_id, code, reason, msg_data);
-        if (status != PJ_SUCCESS) {
-          throw PJJSException("Error hanging up", status);
-        }
-      }
+    pj_status_t status = pjsua_call_hangup(call_id, code, reason, msg_data);
+    if (status != PJ_SUCCESS) {
+      throw PJJSException("Error hanging up", status);
     }
-    unlockCall();
 
     return Undefined();
   }
