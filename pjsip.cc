@@ -1178,14 +1178,21 @@ PJSUA::setAudioDeviceIndex(const Arguments& args)
 {
   HandleScope scope;
   try {
-    if (args.Length() != 1) {
-      throw JSException("Invalid number of arguments to setAudioDeviceIndex(devId)");
+    if (args.Length() > 1) {
+      throw JSException("Invalid number of arguments to setAudioDeviceIndex([devId])");
     }
-    const int devId = args[0]->Int32Value();
-    pj_status_t status = pjsua_set_snd_dev(devId, devId);
-    if (status != PJ_SUCCESS) {
-      throw PJJSException("Error setting audio device index", status);
-    }
+    if (args.Length()) {
+      const int devId = args[0]->Int32Value();
+      pj_status_t status = pjsua_set_snd_dev(devId, devId);
+      if (status != PJ_SUCCESS) {
+        throw PJJSException("Error setting audio device index", status);
+      }
+    } else {
+      pj_status_t status = pjsua_set_null_snd_dev();
+      if (status != PJ_SUCCESS) {
+        throw PJJSException("Error setting no sound device", status);
+      }
+    }      
   }
   catch (const JSException& e) {
     return e.asV8Exception();
