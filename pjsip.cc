@@ -233,10 +233,11 @@ public:
     : unique_lock<mutex>
   {
   public:
-    Lock(NodeMutex& mutex);
+    Lock(const string& name, NodeMutex& mutex);
     ~Lock();
 
   private:
+    const string _name;
     NodeMutex& _mutex;
     Locker* _locker;
     Context::Scope* _scope;
@@ -246,10 +247,11 @@ public:
   class Unlock
   {
   public:
-    Unlock(NodeMutex& mutex);
+    Unlock(const string& name, NodeMutex& mutex);
     ~Unlock();
 
   private:
+    const string _name;
     NodeMutex& _mutex;
   };
 
@@ -370,7 +372,7 @@ class PJSUA
   on_call_state(pjsua_call_id call_id,
                 pjsip_event *e)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_call_state", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("call_state", 1, getCallInfo(call_id));
@@ -381,7 +383,7 @@ class PJSUA
                    pjsua_call_id call_id,
                    pjsip_rx_data *rdata)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_incoming_call", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("incoming_call", 3, getAccInfo(acc_id), getCallInfo(call_id), Undefined());                   
@@ -392,7 +394,7 @@ class PJSUA
                     pjsip_transaction *tsx,
                     pjsip_event *e)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_call_tsx_state", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("call_tsx_state", 3, getCallInfo(call_id), Undefined(), Undefined());
@@ -401,7 +403,7 @@ class PJSUA
   static void
   on_call_media_state(pjsua_call_id call_id)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_call_media_state", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("call_media_state", 1, getCallInfo(call_id));
@@ -413,7 +415,7 @@ class PJSUA
                     unsigned stream_idx,
                     pjmedia_port **p_port)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_stream_created", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("stream_created", 4, getCallInfo(call_id), Undefined(), Integer::New(stream_idx), Undefined());
@@ -424,7 +426,7 @@ class PJSUA
                       pjmedia_session *sess,
                       unsigned stream_idx)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_stream_destroyed", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("stream_destroyed", 3, getCallInfo(call_id), Undefined(), Integer::New(stream_idx));
@@ -434,7 +436,7 @@ class PJSUA
   on_dtmf_digit(pjsua_call_id call_id,
                 int digit)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_dtmf_digit", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("dtmf_digit", 2, getCallInfo(call_id), Integer::New(digit));
@@ -445,7 +447,7 @@ class PJSUA
                            const pj_str_t *dst,
                            pjsip_status_code *code)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_call_transfer_request", _nodeMutex);
     HandleScope handleScope;
 
     Local<Value> result = _nodeMutex.invokeCallback("call_transfer_request", 3, getCallInfo(call_id), Undefined(), Undefined());
@@ -459,7 +461,7 @@ class PJSUA
                           pj_bool_t final,
                           pj_bool_t *p_cont)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_call_transfer_status", _nodeMutex);
     HandleScope handleScope;
 
     Local<Value> result = _nodeMutex.invokeCallback("call_transfer_status", 4, getCallInfo(call_id), Integer::New(st_code),
@@ -473,7 +475,7 @@ class PJSUA
                           int *st_code,
                           pj_str_t *st_text)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_call_replace_request", _nodeMutex);
     HandleScope handleScope;
 
     Local<Value> result = _nodeMutex.invokeCallback("call_replace_request", 2, getCallInfo(call_id), Undefined());
@@ -485,7 +487,7 @@ class PJSUA
   on_call_replaced(pjsua_call_id old_call_id,
                    pjsua_call_id new_call_id)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_call_replaced", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("call_replaced", 2, getCallInfo(old_call_id), getCallInfo(new_call_id));
@@ -494,7 +496,7 @@ class PJSUA
   static void
   on_reg_state(pjsua_acc_id acc_id)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_reg_state", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("reg_state", 1, getAccInfo(acc_id));
@@ -504,7 +506,7 @@ class PJSUA
   on_reg_state2(pjsua_acc_id acc_id,
                 pjsua_reg_info *info)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_reg_state2", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("reg_state2", 2, getAccInfo(acc_id), Undefined());
@@ -520,7 +522,7 @@ class PJSUA
                         pj_str_t *reason,
                         pjsua_msg_data *msg_data)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_incoming_subscribe", _nodeMutex);
     HandleScope handleScope;
 
     Local<Value> result = _nodeMutex.invokeCallback("incoming_subscribe", 5, getAccInfo(acc_id), Undefined(), Undefined(),
@@ -536,7 +538,7 @@ class PJSUA
                          pjsip_evsub_state state,
                          pjsip_event *event)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_srv_subscribe_state", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("srv_subscribe_state", 5, getAccInfo(acc_id), Undefined(),
@@ -631,7 +633,7 @@ class PJSUA
   static void
   on_nat_detect(const pj_stun_nat_detect_result *res)
   {
-    NodeMutex::Lock lock(_nodeMutex);
+    NodeMutex::Lock lock("on_nat_detect", _nodeMutex);
     HandleScope handleScope;
 
     _nodeMutex.invokeCallback("nat_detect", 2,
@@ -698,13 +700,18 @@ NodeMutex PJSUA::_nodeMutex;
 // condition variables, the Lock instance also locks V8 using
 // v8::Locker and enters the context of the callback.
 
-NodeMutex::Lock::Lock(NodeMutex& m)
+NodeMutex::Lock::Lock(const string& name, NodeMutex& m)
   : unique_lock<mutex>(_globalMutex),
+    _name(name),
     _mutex(m),
     _locker(0),
     _scope(0),
     _hasSuspendedNode(false)
 {
+#ifdef DEBUG_LOCKS
+  cout << "Lock::Lock(): " << _name << endl;
+#endif // DEBUG_LOCKS
+
   bool inNodeThread = pthread_equal(_mutex._nodeThreadId, pthread_self());
 
   if (!_nodeSuspended && !inNodeThread) {
@@ -720,10 +727,18 @@ NodeMutex::Lock::Lock(NodeMutex& m)
     _locker = new Locker();
   }
   _scope = new Context::Scope(_mutex._callbackContext);
+
+#ifdef DEBUG_LOCKS
+  cout << "Lock::Lock locked: " << _name << endl;
+#endif // DEBUG_LOCKS
 }
 
 NodeMutex::Lock::~Lock()
 {
+#ifdef DEBUG_LOCKS
+  cout << "Lock::~Lock(): " << _name << endl;
+#endif // DEBUG_LOCKS
+
   delete _scope;
   delete _locker;
 
@@ -731,17 +746,38 @@ NodeMutex::Lock::~Lock()
     _mutex.resumeNodeThread();
     _nodeSuspended = false;
   }
+
+#ifdef DEBUG_LOCKS
+  cout << "Lock::~Lock() unlocked: " << _name << endl;
+#endif // DEBUG_LOCKS
 }
 
-NodeMutex::Unlock::Unlock(NodeMutex& m)
-  : _mutex(m)
+NodeMutex::Unlock::Unlock(const string& name, NodeMutex& m)
+  : _name(name),
+    _mutex(m)
 {
+#ifdef DEBUG_LOCKS
+  cout << "Unlock::Unlock(): " << _name << endl;
+#endif // DEBUG_LOCKS
+
   _mutex._globalMutex.unlock();
+
+#ifdef DEBUG_LOCKS
+  cout << "Unlock::Unlock unlocked: " << _name << endl;
+#endif // DEBUG_LOCKS
 }
 
 NodeMutex::Unlock::~Unlock()
 {
+#ifdef DEBUG_LOCKS
+  cout << "Unlock::~Unlock(): " << _name << endl;
+#endif // DEBUG_LOCKS
+
   _mutex._globalMutex.lock();
+
+#ifdef DEBUG_LOCKS
+  cout << "Unlock::~Unlock locked: " << _name << endl;
+#endif // DEBUG_LOCKS
 }
 
 NodeMutex::NodeMutex()
@@ -775,7 +811,7 @@ NodeMutex::invokeCallback(const char* eventName, int argc, ...)
     args[i + 1] = *va_arg(vl, Handle<Value>);
   }
 
-  NodeMutex::Unlock unlock(*this);
+  NodeMutex::Unlock unlock("invokeCallback", *this);
   TryCatch tryCatch;
   Local<Value> retval = _callback->Call(_callbackContext->Global(), argc + 1, args);
 
@@ -954,7 +990,7 @@ PJSUA::start(const Arguments& args)
 Handle<Value>
 PJSUA::addAccount(const Arguments& args)
 {
-  NodeMutex::Lock lock(_nodeMutex);
+  NodeMutex::Lock lock("addAccount", _nodeMutex);
   HandleScope scope;
   try {
     if (args.Length() != 3) {
@@ -985,7 +1021,7 @@ PJSUA::addAccount(const Arguments& args)
       cfg.allow_contact_rewrite = 1;
 
       {
-        NodeMutex::Unlock lock(_nodeMutex);
+        NodeMutex::Unlock lock("addAccount", _nodeMutex);
         pj_status_t status = pjsua_acc_add(&cfg, PJ_TRUE, &acc_id);
         if (status != PJ_SUCCESS) {
           throw PJJSException("Error adding account", status);
