@@ -212,7 +212,7 @@ setKey(Handle<Object> object, const char* key, const pj_str_t& value)
   object->Set(String::NewSymbol(key), String::New(value.ptr, value.slen));
 }
 
-#define PJ_TIME_VAL_TO_DOUBLE(pjtv) ((double) pjtv.sec + ((double) pjtv.msec * 0.001d))
+#define PJ_TIME_VAL_TO_DOUBLE(pjtv) ((double) pjtv.sec + ((double) pjtv.msec * 0.001))
 
 // //////////////////////////////////////////////////////////////////////
 
