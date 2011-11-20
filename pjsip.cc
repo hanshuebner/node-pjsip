@@ -940,8 +940,16 @@ PJSUA::start(const Arguments& args)
       pjsua_logging_config_default(&log_cfg);
 
       log_cfg.console_level = 1;
-      if (options->Has(String::NewSymbol("console_log_level"))) {
-        log_cfg.console_level = options->Get(String::NewSymbol("console_log_level"))->ToUint32()->Value();
+      if (options->Has(String::NewSymbol("console_level"))) {
+        log_cfg.console_level = options->Get(String::NewSymbol("console_level"))->ToUint32()->Value();
+      }
+      log_cfg.level = 1;
+      if (options->Has(String::NewSymbol("level"))) {
+        log_cfg.level = options->Get(String::NewSymbol("level"))->ToUint32()->Value();
+      }
+      if (options->Has(String::NewSymbol("log_filename"))) {
+        const string log_filename = *String::Utf8Value(options->Get(String::NewSymbol("log_filename")));
+        log_cfg.log_filename = pj_str((char*) log_filename.c_str());
       }
 
       string stunServer;
@@ -966,6 +974,15 @@ PJSUA::start(const Arguments& args)
       pj_status_t status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, NULL);
       if (status != PJ_SUCCESS) {
         throw PJJSException("Error creating transport", status);
+      }
+    }
+
+    /* Set null sound device */
+    {
+      pj_status_t status = pjsua_set_null_snd_dev();
+      if (status != PJ_SUCCESS) {
+        throw PJJSException("Error setting null sound device", status);
+        abort();
       }
     }
 
