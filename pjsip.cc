@@ -939,7 +939,7 @@ PJSUA::start(const Arguments& args)
 
       pjsua_logging_config_default(&log_cfg);
 
-      log_cfg.console_level = 1;
+      log_cfg.console_level = 0;
       if (options->Has(String::NewSymbol("console_level"))) {
         log_cfg.console_level = options->Get(String::NewSymbol("console_level"))->ToUint32()->Value();
       }
