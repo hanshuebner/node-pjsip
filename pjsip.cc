@@ -494,22 +494,20 @@ class PJSUA
   }
 
   static void
-  on_reg_state(pjsua_acc_id acc_id)
-  {
-    NodeMutex::Lock lock("on_reg_state", _nodeMutex);
-    HandleScope handleScope;
-
-    _nodeMutex.invokeCallback("reg_state", 1, getAccInfo(acc_id));
-  }
-
-  static void
   on_reg_state2(pjsua_acc_id acc_id,
-                pjsua_reg_info *info)
+                pjsua_reg_info* info)
   {
     NodeMutex::Lock lock("on_reg_state2", _nodeMutex);
     HandleScope handleScope;
 
-    _nodeMutex.invokeCallback("reg_state2", 2, getAccInfo(acc_id), Undefined());
+    Local<Object> regInfo = Object::New();
+    setKey(regInfo, "status", info->cbparam->status);
+    setKey(regInfo, "code", info->cbparam->code);
+    setKey(regInfo, "reason", info->cbparam->reason);
+    setKey(regInfo, "expiration", info->cbparam->expiration);
+    // fixme, several fields missing
+
+    _nodeMutex.invokeCallback("reg_state2", 2, getAccInfo(acc_id), regInfo);
   }
 
   static void
@@ -923,7 +921,6 @@ PJSUA::start(const Arguments& args)
       cfg.cb.on_call_transfer_status = on_call_transfer_status;
       cfg.cb.on_call_replace_request = on_call_replace_request;
       cfg.cb.on_call_replaced = on_call_replaced;
-      cfg.cb.on_reg_state = on_reg_state;
       cfg.cb.on_reg_state2 = on_reg_state2;
       cfg.cb.on_incoming_subscribe = on_incoming_subscribe;
       cfg.cb.on_srv_subscribe_state = on_srv_subscribe_state;
