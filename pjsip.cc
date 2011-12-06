@@ -970,7 +970,13 @@ PJSUA::start(const Arguments& args)
       pjsua_transport_config cfg;
 
       pjsua_transport_config_default(&cfg);
-      cfg.port = 5060;
+
+      if (options->Has(String::NewSymbol("port"))) {
+        cfg.port = options->Get(String::NewSymbol("port"))->ToUint32()->Value();
+      } else {
+        cfg.port = 5060;
+      }
+
       pj_status_t status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, NULL);
       if (status != PJ_SUCCESS) {
         throw PJJSException("Error creating transport", status);
