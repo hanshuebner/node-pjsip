@@ -309,9 +309,10 @@ class PJSUA
   static NodeMutex _nodeMutex;
 
   // All PJSIP configuration is owned by the PJSUA class
-  static pjsua_config cfg;
-  static pjsua_logging_config log_cfg;
-  static pjsua_transport_config transport_cfg;
+  static pjsua_config _pjsuaConfig;
+  static pjsua_logging_config _loggingConfig;
+  static pjsua_transport_config _transportConfig;
+  static pjsua_acc_config _accConfig;
 
   // //////////////////////////////////////////////////////////////////////
   //
@@ -689,6 +690,10 @@ private:
 // Static member allocation
 
 NodeMutex PJSUA::_nodeMutex;
+pjsua_config PJSUA::_pjsuaConfig;
+pjsua_logging_config PJSUA::_loggingConfig;
+pjsua_transport_config PJSUA::_transportConfig;
+pjsua_acc_config PJSUA::_accConfig;
 
 // //////////////////////////////////////////////////////////////////////
 
@@ -911,57 +916,57 @@ PJSUA::start(const Arguments& args)
 
     /* Init pjsua */
     {
-      pjsua_config_default(&cfg);
-      cfg.cb.on_call_state = on_call_state;
-      cfg.cb.on_incoming_call = on_incoming_call;
-      cfg.cb.on_call_tsx_state = on_call_tsx_state;
-      cfg.cb.on_call_media_state = on_call_media_state;
-      cfg.cb.on_stream_created = on_stream_created;
-      cfg.cb.on_stream_destroyed = on_stream_destroyed;
-      cfg.cb.on_dtmf_digit = on_dtmf_digit;
-      cfg.cb.on_call_transfer_request = on_call_transfer_request;
-      cfg.cb.on_call_transfer_status = on_call_transfer_status;
-      cfg.cb.on_call_replace_request = on_call_replace_request;
-      cfg.cb.on_call_replaced = on_call_replaced;
-      cfg.cb.on_reg_state2 = on_reg_state2;
-      cfg.cb.on_incoming_subscribe = on_incoming_subscribe;
-      cfg.cb.on_srv_subscribe_state = on_srv_subscribe_state;
-      cfg.cb.on_buddy_state = on_buddy_state;
-      cfg.cb.on_buddy_evsub_state = on_buddy_evsub_state;
-      cfg.cb.on_pager = on_pager;
-      cfg.cb.on_pager2 = on_pager2;
-      cfg.cb.on_pager_status = on_pager_status;
-      cfg.cb.on_pager_status2 = on_pager_status2;
-      cfg.cb.on_typing = on_typing;
-      cfg.cb.on_typing2 = on_typing2;
-      cfg.cb.on_nat_detect = on_nat_detect;
-      cfg.cb.on_mwi_info = on_mwi_info;
-      cfg.cb.on_transport_state = on_transport_state;
-      cfg.cb.on_ice_transport_error = on_ice_transport_error;
+      pjsua_config_default(&_pjsuaConfig);
+      _pjsuaConfig.cb.on_call_state = on_call_state;
+      _pjsuaConfig.cb.on_incoming_call = on_incoming_call;
+      _pjsuaConfig.cb.on_call_tsx_state = on_call_tsx_state;
+      _pjsuaConfig.cb.on_call_media_state = on_call_media_state;
+      _pjsuaConfig.cb.on_stream_created = on_stream_created;
+      _pjsuaConfig.cb.on_stream_destroyed = on_stream_destroyed;
+      _pjsuaConfig.cb.on_dtmf_digit = on_dtmf_digit;
+      _pjsuaConfig.cb.on_call_transfer_request = on_call_transfer_request;
+      _pjsuaConfig.cb.on_call_transfer_status = on_call_transfer_status;
+      _pjsuaConfig.cb.on_call_replace_request = on_call_replace_request;
+      _pjsuaConfig.cb.on_call_replaced = on_call_replaced;
+      _pjsuaConfig.cb.on_reg_state2 = on_reg_state2;
+      _pjsuaConfig.cb.on_incoming_subscribe = on_incoming_subscribe;
+      _pjsuaConfig.cb.on_srv_subscribe_state = on_srv_subscribe_state;
+      _pjsuaConfig.cb.on_buddy_state = on_buddy_state;
+      _pjsuaConfig.cb.on_buddy_evsub_state = on_buddy_evsub_state;
+      _pjsuaConfig.cb.on_pager = on_pager;
+      _pjsuaConfig.cb.on_pager2 = on_pager2;
+      _pjsuaConfig.cb.on_pager_status = on_pager_status;
+      _pjsuaConfig.cb.on_pager_status2 = on_pager_status2;
+      _pjsuaConfig.cb.on_typing = on_typing;
+      _pjsuaConfig.cb.on_typing2 = on_typing2;
+      _pjsuaConfig.cb.on_nat_detect = on_nat_detect;
+      _pjsuaConfig.cb.on_mwi_info = on_mwi_info;
+      _pjsuaConfig.cb.on_transport_state = on_transport_state;
+      _pjsuaConfig.cb.on_ice_transport_error = on_ice_transport_error;
 
-      pjsua_logging_config_default(&log_cfg);
+      pjsua_logging_config_default(&_loggingConfig);
 
-      log_cfg.console_level = 0;
+      _loggingConfig.console_level = 0;
       if (options->Has(String::NewSymbol("console_level"))) {
-        log_cfg.console_level = options->Get(String::NewSymbol("console_level"))->ToUint32()->Value();
+        _loggingConfig.console_level = options->Get(String::NewSymbol("console_level"))->ToUint32()->Value();
       }
-      log_cfg.level = 1;
+      _loggingConfig.level = 1;
       if (options->Has(String::NewSymbol("level"))) {
-        log_cfg.level = options->Get(String::NewSymbol("level"))->ToUint32()->Value();
+        _loggingConfig.level = options->Get(String::NewSymbol("level"))->ToUint32()->Value();
       }
       if (options->Has(String::NewSymbol("log_filename"))) {
         const string log_filename = *String::Utf8Value(options->Get(String::NewSymbol("log_filename")));
-        log_cfg.log_filename = pj_str((char*) log_filename.c_str());
+        _loggingConfig.log_filename = pj_str((char*) log_filename.c_str());
       }
 
       string stunServer;
       if (options->Has(String::NewSymbol("stun_server"))) {
         stunServer = *String::Utf8Value(options->Get(String::NewSymbol("stun_server")));
-        cfg.stun_srv[0] = pj_str((char*) stunServer.c_str());
-        cfg.stun_srv_cnt = 1;
+        _pjsuaConfig.stun_srv[0] = pj_str((char*) stunServer.c_str());
+        _pjsuaConfig.stun_srv_cnt = 1;
       }
 
-      pj_status_t status = pjsua_init(&cfg, &log_cfg, NULL);
+      pj_status_t status = pjsua_init(&_pjsuaConfig, &_loggingConfig, NULL);
       if (status != PJ_SUCCESS) {
         throw PJJSException("Error creating transport", status);
       }
@@ -969,15 +974,15 @@ PJSUA::start(const Arguments& args)
 
     /* Add UDP transport. */
     {
-      pjsua_transport_config_default(&transport_cfg);
+      pjsua_transport_config_default(&_transportConfig);
 
       if (options->Has(String::NewSymbol("port"))) {
-        transport_cfg.port = options->Get(String::NewSymbol("port"))->ToUint32()->Value();
+        _transportConfig.port = options->Get(String::NewSymbol("port"))->ToUint32()->Value();
       } else {
-        transport_cfg.port = 5060;
+        _transportConfig.port = 5060;
       }
 
-      pj_status_t status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &transport_cfg, NULL);
+      pj_status_t status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &_transportConfig, NULL);
       if (status != PJ_SUCCESS) {
         throw PJJSException("Error creating transport", status);
       }
@@ -1026,23 +1031,22 @@ PJSUA::addAccount(const Arguments& args)
   
     /* Register to SIP server by creating SIP account. */
     {
-      pjsua_acc_config cfg;
       pjsua_acc_id acc_id;
 
-      pjsua_acc_config_default(&cfg);
-      cfg.id = pj_str((char*) id.c_str());
-      cfg.reg_uri = pj_str((char*) regUri.c_str());
-      cfg.cred_count = 1;
-      cfg.cred_info[0].realm = pj_str((char*) sipDomain.c_str());
-      cfg.cred_info[0].scheme = pj_str((char*) "digest");
-      cfg.cred_info[0].username = pj_str((char*) sipUser.c_str());
-      cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
-      cfg.cred_info[0].data = pj_str((char*) sipPassword.c_str());
-      cfg.allow_contact_rewrite = 1;
+      pjsua_acc_config_default(&_accConfig);
+      _accConfig.id = pj_str((char*) id.c_str());
+      _accConfig.reg_uri = pj_str((char*) regUri.c_str());
+      _accConfig.cred_count = 1;
+      _accConfig.cred_info[0].realm = pj_str((char*) sipDomain.c_str());
+      _accConfig.cred_info[0].scheme = pj_str((char*) "digest");
+      _accConfig.cred_info[0].username = pj_str((char*) sipUser.c_str());
+      _accConfig.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+      _accConfig.cred_info[0].data = pj_str((char*) sipPassword.c_str());
+      _accConfig.allow_contact_rewrite = 1;
 
       {
         NodeMutex::Unlock lock("addAccount", _nodeMutex);
-        pj_status_t status = pjsua_acc_add(&cfg, PJ_TRUE, &acc_id);
+        pj_status_t status = pjsua_acc_add(&_accConfig, PJ_TRUE, &acc_id);
         if (status != PJ_SUCCESS) {
           throw PJJSException("Error adding account", status);
         }
