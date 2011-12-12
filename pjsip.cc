@@ -308,6 +308,11 @@ class PJSUA
   static Persistent<Function> _callback;
   static NodeMutex _nodeMutex;
 
+  // All PJSIP configuration is owned by the PJSUA class
+  static pjsua_config cfg;
+  static pjsua_logging_config log_cfg;
+  static pjsua_transport_config transport_cfg;
+
   // //////////////////////////////////////////////////////////////////////
   //
   // Callback functions to be called by PJ
@@ -906,9 +911,6 @@ PJSUA::start(const Arguments& args)
 
     /* Init pjsua */
     {
-      pjsua_config cfg;
-      pjsua_logging_config log_cfg;
-
       pjsua_config_default(&cfg);
       cfg.cb.on_call_state = on_call_state;
       cfg.cb.on_incoming_call = on_incoming_call;
@@ -967,17 +969,15 @@ PJSUA::start(const Arguments& args)
 
     /* Add UDP transport. */
     {
-      pjsua_transport_config cfg;
-
-      pjsua_transport_config_default(&cfg);
+      pjsua_transport_config_default(&transport_cfg);
 
       if (options->Has(String::NewSymbol("port"))) {
-        cfg.port = options->Get(String::NewSymbol("port"))->ToUint32()->Value();
+        transport_cfg.port = options->Get(String::NewSymbol("port"))->ToUint32()->Value();
       } else {
-        cfg.port = 5060;
+        transport_cfg.port = 5060;
       }
 
-      pj_status_t status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &cfg, NULL);
+      pj_status_t status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &transport_cfg, NULL);
       if (status != PJ_SUCCESS) {
         throw PJJSException("Error creating transport", status);
       }
